@@ -141,7 +141,9 @@ light("WallLight", (60, 60, 260), -100, -35, 4.0, size=200.0, follow_head=False)
 volume = spawn(unreal.PostProcessVolume, (0, 0, 0), "PostProcess")
 volume.set_editor_property("unbound", True)
 settings = volume.get_editor_property("settings")
-for name, value in (("vignette_intensity", 0.35), ("film_grain_intensity", 0.0), ("bloom_intensity", 0.2)):
+for name, value in (("vignette_intensity", 0.35), ("film_grain_intensity", 0.0), ("bloom_intensity", 0.2),
+                    # skin rendered too orange: white balance slightly cooler, a little less saturation (#44)
+                    ("white_temp", 7000.0), ("color_saturation", unreal.Vector4(1.0, 1.0, 1.0, 0.9))):
     settings.set_editor_property("override_" + name, True)
     settings.set_editor_property(name, value)
 volume.set_editor_property("settings", settings)
@@ -155,6 +157,7 @@ else:
     factory.set_editor_property("struct", unreal.VIPPatientRow.static_struct())
     table = unreal.AssetToolsHelpers.get_asset_tools().create_asset("DT_Patients", "/Game/Patient", unreal.DataTable, factory)
 rows = [{"Name": p["preset"], "Preset": p["preset"], "Gender": p["gender"], "Age": p["age"],
+         "Character": p.get("character", ""),
          "Blueprint": "%s.BP_MHC_%s_C" % (blueprint_path(p["preset"]), p["preset"])}
         for p in sorted(PATIENTS, key=lambda p: not p.get("default"))  # the app falls back to the first row
         if lib.does_asset_exist(blueprint_path(p["preset"]))]

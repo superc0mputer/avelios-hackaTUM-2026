@@ -1,9 +1,14 @@
 #include "VIPSpeechSubsystem.h"
 
+#include "VIPBody.h"
+#include "VIPExpressions.h"
+#include "VIPLife.h"
 #include "VIPPatients.h"
+#include "VIPSigns.h"
 #include "VIPSpeechSource.h"
 
 #include "Animation/AnimInstance.h"
+#include "Animation/AnimSequence.h"
 #include "Audio.h"
 #include "Components/AudioComponent.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -12,12 +17,16 @@
 #include "ILiveLinkClient.h"
 #include "LiveLinkTypes.h"
 #include "Roles/LiveLinkBasicRole.h"
+#include "Camera/CameraActor.h"
 #include "Kismet/GameplayStatics.h"
+#include "Materials/MaterialInterface.h"
 #include "MetaHumanAudioBaseLiveLinkSubjectSettings.h"
 #include "Misc/CommandLine.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Parse.h"
+#include "Misc/Paths.h"
 #include "Sound/SoundWaveProcedural.h"
+#include "UnrealClient.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogVIP, Log, All);
 
@@ -31,6 +40,56 @@ namespace
 
 	// Solver look-ahead plus processing
 	constexpr double SoundDelaySeconds = 0.12;
+
+	// The face value the patient currently receives, or -1 if there is no frame yet
+	float ReadFaceValue(const TCHAR* Property)
+	{
+		IModularFeatures& Features = IModularFeatures::Get();
+		if (!Features.IsModularFeatureAvailable(ILiveLinkClient::ModularFeatureName))
+		{
+			return -1.0f;
+		}
+		FLiveLinkSubjectFrameData Frame;
+		ILiveLinkClient& Client = Features.GetModularFeature<ILiveLinkClient>(ILiveLinkClient::ModularFeatureName);
+		if (!Client.EvaluateFrame_AnyThread(FLiveLinkSubjectName(SubjectName), ULiveLinkBasicRole::StaticClass(), Frame))
+		{
+			return -1.0f;
+		}
+		const FLiveLinkBaseStaticData* Static = Frame.StaticData.Cast<FLiveLinkBaseStaticData>();
+		const FLiveLinkBaseFrameData* Data = Frame.FrameData.Cast<FLiveLinkBaseFrameData>();
+		if (!Static || !Data)
+		{
+			return -1.0f;
+		}
+		const int32 Index = Static->PropertyNames.IndexOfByKey(FName(Property));
+		return Data->PropertyValues.IsValidIndex(Index) ? Data->PropertyValues[Index] : -1.0f;
+	}
+
+	// Emotion blending. Time constants: about 63 % of the way after this many seconds.
+	constexpr float CrossfadeSeconds = 0.4f;   // from one emotion to the next
+	constexpr float RiseSeconds = 0.3f;        // strength going up
+	constexpr float FallSeconds = 1.5f;        // strength easing down to rest
+	constexpr double HoldSeconds = 4.0;        // full strength after the mood is set or speech ends
+	constexpr float RestFraction = 0.5f;       // resting strength between turns
+	constexpr float MaxIntensity = 2.0f;
+	constexpr float SolverRampPerSecond = 2.5f; // the solver has one mood: fade it out, switch, fade in
+	// Head tilt for looking down (negative is down, checked in screenshots). Larger head offsets pull the
+	// face mesh's neck away from the collar, so the eyes do most of the looking away
+	constexpr float DownPitchDegrees = 0.0f;
+	// Turning the head toward -1 by more than about 1.5 degrees pulls the neck over the collar (the
+	// clothing follows the body, the head turn only the face), so looking away goes to this side.
+	// Can be overridden with -VIPSide=-1 for comparison
+	float PreferredSide = 1.0f;
+	constexpr float PainSeconds = 1.0f;        // how fast the lasting pain face follows the level
+	constexpr double WinceRise = 0.15, WinceHold = 0.35, WinceFall = 0.9;
+	constexpr float WinceStrength = 0.45f;     // on top of the lasting face, at pain 10
+	constexpr float RestInSeconds = 0.5f;       // mouth closing after speech
+	constexpr float RestOutSeconds = 0.04f;     // solver back in charge when speech starts
+
+	float Approach(float Current, float Target, float DeltaTime, float TimeConstant)
+	{
+		return Target + (Current - Target) * FMath::Exp(-DeltaTime / TimeConstant);
+	}
 
 	bool LoadWav(const FString& Path, TArray<int16>& OutSamples, int32& OutRate)
 	{
@@ -98,20 +157,187 @@ void UVIPSpeechSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 		bLogFace = true;
 	}
 
+	Expressions = MakeShared<FVIPExpressionLayer>();
+	Life = MakeShared<FVIPLife>();
 	StartSource(VoiceSampleRate);
 
-	// Which patient: from the case later (#24); for now from the command line
-	FString Gender;
-	int32 Age = -1;
-	FParse::Value(FCommandLine::Get(), TEXT("VIPGender="), Gender);
-	FParse::Value(FCommandLine::Get(), TEXT("VIPAge="), Age);
-	VIPPatients::Choose(InWorld, Gender, Age);
+	// Which patient: a case file (-VIPCase=), or gender and age from the command line. The voice
+	// server can send another case at any time (VIPBackendLink)
+	FVIPCase Case;
+	FString CasePath;
+	if (FParse::Value(FCommandLine::Get(), TEXT("VIPCase="), CasePath) && !FVIPCase::FromFile(CasePath, Case))
+	{
+		UE_LOG(LogVIP, Warning, TEXT("Could not read case %s"), *CasePath);
+	}
+	FParse::Value(FCommandLine::Get(), TEXT("VIPGender="), Case.Gender);
+	FParse::Value(FCommandLine::Get(), TEXT("VIPAge="), Case.Age);
+	FParse::Value(FCommandLine::Get(), TEXT("VIPCharacter="), Case.Character);
+	FParse::Value(FCommandLine::Get(), TEXT("VIPPersonality="), Case.Personality);
+	ApplyCase(Case);
 
-	DriveFace();
-
-	FString Emotion = TEXT("neutral");
+	FString Emotion = TargetEmotion; // the case's mood unless -VIPMood= says otherwise
+	float Intensity = TargetIntensity > 0 ? TargetIntensity : 1.0f;
+	FString Moods;
 	FParse::Value(FCommandLine::Get(), TEXT("VIPMood="), Emotion);
-	SetEmotion(Emotion, 1.0f);
+	FParse::Value(FCommandLine::Get(), TEXT("VIPIntensity="), Intensity);
+	FParse::Value(FCommandLine::Get(), TEXT("VIPMoodSeconds="), TestMoodSeconds);
+	if (FParse::Value(FCommandLine::Get(), TEXT("VIPMoods="), Moods, false))
+	{
+		Moods.ParseIntoArray(TestMoods, TEXT(","));
+		NextTestMoodAt = FPlatformTime::Seconds() + 3;
+		bLogFace = true;
+	}
+	SetEmotion(Emotion, Intensity);
+	FParse::Value(FCommandLine::Get(), TEXT("VIPSide="), PreferredSide);
+	FString Breathing;
+	if (FParse::Value(FCommandLine::Get(), TEXT("VIPBreathing="), Breathing))
+	{
+		SetBreathing(Breathing);
+	}
+	float StartDiscomfort = 0;
+	if (FParse::Value(FCommandLine::Get(), TEXT("VIPDiscomfort="), StartDiscomfort))
+	{
+		SetDiscomfort(StartDiscomfort);
+	}
+	float Pain = 0;
+	if (FParse::Value(FCommandLine::Get(), TEXT("VIPPain="), Pain))
+	{
+		SetPain(Pain);
+	}
+
+	// -VIPWide: pull the camera back to see the whole patient (clothing, posture, breathing checks)
+	float Wide = 0;
+	if (FParse::Value(FCommandLine::Get(), TEXT("VIPWide="), Wide))
+	{
+		for (TActorIterator<ACameraActor> It(&InWorld); It; ++It)
+		{
+			It->AddActorWorldOffset(FVector(0, Wide, -Wide * 0.35f));
+		}
+	}
+
+	FString Shots;
+	if (FParse::Value(FCommandLine::Get(), TEXT("VIPShots="), Shots, false))
+	{
+		Shots.ParseIntoArray(ShotSteps, TEXT(","));
+		ShotDir = FPaths::ProjectSavedDir() / TEXT("VIPShots");
+		FParse::Value(FCommandLine::Get(), TEXT("VIPShotDir="), ShotDir);
+		NextShotAt = FPlatformTime::Seconds() + 6; // let the face and exposure settle
+		bLogFace = true;
+	}
+}
+
+void UVIPSpeechSubsystem::ApplyTestStep(const FString& Step)
+{
+	// "-": change nothing, just take the shot (e.g. while the voice server drives the patient)
+	if (Step == TEXT("-"))
+	{
+		return;
+	}
+	// "listening", "thinking", "idle": attention; "stop": interrupt
+	if (Step == TEXT("listening") || Step == TEXT("thinking") || Step == TEXT("idle"))
+	{
+		SetAttention(Step);
+		return;
+	}
+	if (Step.StartsWith(TEXT("pain=")))
+	{
+		SetPain(FCString::Atof(*Step.Mid(5)));
+		return;
+	}
+	if (Step.StartsWith(TEXT("breathing=")))
+	{
+		SetBreathing(Step.Mid(10));
+		return;
+	}
+	if (Step.StartsWith(TEXT("discomfort=")))
+	{
+		SetDiscomfort(FCString::Atof(*Step.Mid(11)));
+		return;
+	}
+	if (Step.StartsWith(TEXT("signs=")))
+	{
+		// "signs=pale+sweaty" ("+" because "," separates steps); "signs=" removes them
+		TArray<FString> Signs;
+		Step.Mid(6).ParseIntoArray(Signs, TEXT("+"));
+		if (Patient.IsValid())
+		{
+			VIPSigns::Apply(*Patient, Signs);
+		}
+		return;
+	}
+	if (Step == TEXT("wince"))
+	{
+		WinceStart = FPlatformTime::Seconds() + ShotSettleSeconds - 0.3; // at its peak when the shot is taken
+		return;
+	}
+	if (Step == TEXT("stop"))
+	{
+		StopSpeaking();
+		return;
+	}
+	// "sad" or "sad@1.5": emotion at an intensity
+	FString Name = Step;
+	FString Strength;
+	float Intensity = TargetIntensity > 0 ? TargetIntensity : 1.0f;
+	if (Step.Split(TEXT("@"), &Name, &Strength))
+	{
+		Intensity = FCString::Atof(*Strength);
+	}
+	SetEmotion(Name, Intensity);
+}
+
+void UVIPSpeechSubsystem::RunShots(double Now)
+{
+	if (ShotSteps.Num() == 0 || Now < NextShotAt)
+	{
+		return;
+	}
+	if (ShotIndex >= ShotSteps.Num())
+	{
+		UE_LOG(LogVIP, Display, TEXT("VIP: SHOTS DONE in %s"), *ShotDir);
+		ShotSteps.Reset();
+		RequestEngineExit(TEXT("VIP shots done"));
+		return;
+	}
+	if (!bShotApplied)
+	{
+		ApplyTestStep(ShotSteps[ShotIndex]);
+		bShotApplied = true;
+		NextShotAt = Now + ShotSettleSeconds;
+		return;
+	}
+	const FString File = ShotDir / FString::Printf(TEXT("%02d_%s.png"), ShotIndex, *ShotSteps[ShotIndex].Replace(TEXT("@"), TEXT("_")));
+	FScreenshotRequest::RequestScreenshot(File, false, false);
+	UE_LOG(LogVIP, Display, TEXT("VIP: shot %s"), *File);
+	bShotApplied = false;
+	++ShotIndex;
+	NextShotAt = Now + 0.5;
+}
+
+void UVIPSpeechSubsystem::AnimateBody(USkeletalMeshComponent& Body)
+{
+	// Without body data the MetaHuman stands in the A-pose with its arms out. Epic's idle loop gives
+	// arms down, breathing and small weight shifts (#44, #36)
+	FString Path = TEXT("/MetaHumanCharacter/Optional/Animation/UEFNAnimPreset/Locomotion/AS_MH_Neutral_Stand_Idle_Loop.AS_MH_Neutral_Stand_Idle_Loop");
+	FParse::Value(FCommandLine::Get(), TEXT("VIPBodyAnim="), Path);
+	if (Path == TEXT("none"))
+	{
+		return;
+	}
+	UAnimSequence* Idle = LoadObject<UAnimSequence>(nullptr, *Path);
+	if (!Idle)
+	{
+		UE_LOG(LogVIP, Warning, TEXT("Body idle %s not found, body stays in its rest pose"), *Path);
+	}
+	Body.SetAnimInstanceClass(UVIPBodyAnimInstance::StaticClass());
+	BodyAnim = Cast<UVIPBodyAnimInstance>(Body.GetAnimInstance());
+	if (!BodyAnim || !Idle)
+	{
+		return;
+	}
+	BodyAnim->Idle = Idle;
+	ApplyBreathing();
+	UE_LOG(LogVIP, Display, TEXT("Body plays %s with breathing"), *Idle->GetName());
 }
 
 void UVIPSpeechSubsystem::DriveFace()
@@ -129,6 +355,36 @@ void UVIPSpeechSubsystem::DriveFace()
 		TInlineComponentArray<USkeletalMeshComponent*> Meshes(*It);
 		for (USkeletalMeshComponent* Mesh : Meshes)
 		{
+			if (FParse::Param(FCommandLine::Get(), TEXT("VIPDumpControls")))
+			{
+				UE_LOG(LogVIP, Display, TEXT("mesh %s.%s: mode %d, anim %s, leader %s, bones %d"), *It->GetName(), *Mesh->GetName(),
+					static_cast<int32>(Mesh->GetAnimationMode()), Mesh->GetAnimClass() ? *Mesh->GetAnimClass()->GetName() : TEXT("none"),
+					Mesh->LeaderPoseComponent.IsValid() ? *Mesh->LeaderPoseComponent->GetName() : TEXT("none"), Mesh->GetNumBones());
+				for (int32 Slot = 0; Slot < Mesh->GetNumMaterials(); ++Slot)
+				{
+					UMaterialInterface* Material = Mesh->GetMaterial(Slot);
+					if (!Material)
+					{
+						continue;
+					}
+					TArray<FMaterialParameterInfo> Infos;
+					TArray<FGuid> Ids;
+					FString Names;
+					Material->GetAllScalarParameterInfo(Infos, Ids);
+					for (const FMaterialParameterInfo& Info : Infos) { Names += Info.Name.ToString() + TEXT("; "); }
+					Names += TEXT("| vectors: ");
+					Material->GetAllVectorParameterInfo(Infos, Ids);
+					for (const FMaterialParameterInfo& Info : Infos) { Names += Info.Name.ToString() + TEXT("; "); }
+					const TArray<FName> SlotNames = Mesh->GetMaterialSlotNames();
+					const FString SlotName = SlotNames.IsValidIndex(Slot) ? SlotNames[Slot].ToString() : FString(TEXT("?"));
+					UE_LOG(LogVIP, Display, TEXT("material %s slot %d (%s) %s: %s"), *Mesh->GetName(), Slot, *SlotName, *Material->GetName(), *Names);
+				}
+			}
+			if (Mesh->GetName() == TEXT("Body"))
+			{
+				AnimateBody(*Mesh);
+				continue;
+			}
 			if (Mesh->GetName() != TEXT("Face"))
 			{
 				continue;
@@ -159,7 +415,7 @@ void UVIPSpeechSubsystem::StartSource(int32 SampleRate)
 	}
 
 	Queue = MakeShared<FVIPSpeechQueue>(SampleRate);
-	TSharedPtr<FVIPSpeechSource> SpeechSource = MakeShared<FVIPSpeechSource>(Queue.ToSharedRef());
+	TSharedPtr<FVIPSpeechSource> SpeechSource = MakeShared<FVIPSpeechSource>(Queue.ToSharedRef(), Expressions.ToSharedRef(), Life.ToSharedRef());
 	Features.GetModularFeature<ILiveLinkClient>(ILiveLinkClient::ModularFeatureName).AddSource(SpeechSource);
 	Source = SpeechSource;
 
@@ -213,9 +469,18 @@ void UVIPSpeechSubsystem::Speak(const TArray<int16>& Samples, int32 SampleRate)
 	{
 		Floats.Add(Sample / 32768.0f);
 	}
+	const double Now = FPlatformTime::Seconds();
+	if (bLogFace && Now >= SpeakingUntil)
+	{
+		// Delay probe (test runs only): where the voice starts in this audio, measured from the call
+		int32 Onset = Audio.IndexOfByPredicate([](int16 Sample) { return FMath::Abs(Sample) > 1000; });
+		LatencySpeakAt = Now;
+		LatencyVoiceOffset = Onset == INDEX_NONE ? 0.0 : static_cast<double>(Onset) / Queue->SampleRate;
+		bLatencyPending = true;
+		bLatencySoundPending = true;
+	}
 	Queue->Add(Floats);
 
-	const double Now = FPlatformTime::Seconds();
 	if (DelayedSound.IsEmpty())
 	{
 		PlaySoundAt = Now + SoundDelaySeconds;
@@ -225,23 +490,299 @@ void UVIPSpeechSubsystem::Speak(const TArray<int16>& Samples, int32 SampleRate)
 	UE_LOG(LogVIP, Display, TEXT("Speaking %.1f s"), static_cast<float>(Audio.Num()) / Queue->SampleRate);
 }
 
-void UVIPSpeechSubsystem::SetEmotion(const FString& Emotion, float Intensity)
+void UVIPSpeechSubsystem::SetAttention(const FString& State)
 {
-	if (!Settings)
+	const FString Name = State.TrimStartAndEnd().ToLower();
+	const bool bKnown = Name == TEXT("listening") || Name == TEXT("thinking") || Name == TEXT("idle");
+	if (!bKnown)
+	{
+		UE_LOG(LogVIP, Warning, TEXT("Unknown attention '%s', using listening"), *State);
+	}
+	const FString NewAttention = bKnown ? Name : TEXT("listening");
+	if (NewAttention != Attention)
+	{
+		ThinkSide = PreferredSide; // people tend to look away to their preferred side
+		AttentionSetAt = FPlatformTime::Seconds();
+	}
+	Attention = NewAttention;
+	UE_LOG(LogVIP, Display, TEXT("Attention %s"), *Attention);
+}
+
+void UVIPSpeechSubsystem::SetBreathing(float PerMinute, float InDepth, float Shoulders)
+{
+	BreathsPerMinute = FMath::Clamp(PerMinute, 4.0f, 50.0f);
+	BreathDepth = FMath::Clamp(InDepth, 0.2f, 3.0f);
+	BreathShoulders = FMath::Clamp(Shoulders, 0.0f, 1.0f);
+	UE_LOG(LogVIP, Display, TEXT("Breathing %.0f/min depth %.1f shoulders %.1f"), BreathsPerMinute, BreathDepth, BreathShoulders);
+	ApplyBreathing();
+}
+
+void UVIPSpeechSubsystem::SetBreathing(const FString& Pattern)
+{
+	// The patterns the case can name (#36); a number alone is a rate at normal depth
+	const FString Name = Pattern.TrimStartAndEnd().ToLower();
+	if (Name == TEXT("normal"))           { SetBreathing(14, 1.0f, 0.15f); }
+	else if (Name == TEXT("fast_shallow")) { SetBreathing(28, 0.55f, 0.35f); }
+	else if (Name == TEXT("laboured") || Name == TEXT("labored")) { SetBreathing(24, 1.6f, 1.0f); }
+	else if (Name == TEXT("slow_deep"))    { SetBreathing(9, 1.5f, 0.2f); }
+	else if (Name.IsNumeric())             { SetBreathing(FCString::Atof(*Name), 1.0f, 0.2f); }
+	else
+	{
+		UE_LOG(LogVIP, Warning, TEXT("Unknown breathing '%s', using normal"), *Pattern);
+		SetBreathing(14, 1.0f, 0.15f);
+	}
+}
+
+void UVIPSpeechSubsystem::ApplyBreathing()
+{
+	if (BodyAnim)
+	{
+		BodyAnim->BreathsPerMinute = BreathsPerMinute;
+		BodyAnim->Depth = BreathDepth;
+		BodyAnim->ShoulderUse = BreathShoulders;
+	}
+}
+
+void UVIPSpeechSubsystem::SetPain(float InLevel)
+{
+	PainLevel = FMath::Clamp(FMath::Max(InLevel, CasePain), 0.0f, 10.0f); // never below the case
+	if (PainLevel < 3)
+	{
+		NextWince = 0;
+	}
+	UE_LOG(LogVIP, Display, TEXT("Pain %.1f"), PainLevel);
+}
+
+void UVIPSpeechSubsystem::ApplyCase(const FVIPCase& Case)
+{
+	UWorld* World = GetWorld();
+	if (!World)
 	{
 		return;
 	}
+	int32 LooksAge = 72; // Walter, the patient placed in the level
+	Patient = VIPPatients::Choose(*World, Case.Gender, Case.Age, &LooksAge, Case.Character);
+	DriveFace(); // also restarts the body animation of a newly spawned patient
+
+	// Visible signs of illness (#34); -VIPSigns=pale,sweaty adds to the case's
+	TArray<FString> Signs = Case.VisibleSigns;
+	FString ExtraSigns;
+	if (FParse::Value(FCommandLine::Get(), TEXT("VIPSigns="), ExtraSigns, false))
+	{
+		TArray<FString> Extra;
+		ExtraSigns.ParseIntoArray(Extra, TEXT(","));
+		Signs.Append(Extra);
+	}
+	if (Patient.IsValid())
+	{
+		VIPSigns::Apply(*Patient, Signs);
+	}
+
+	// Older patients move less and slower; personality shows in blinking, gaze and movement
+	Style = FVIPPersonalityStyle::For(Case.Personality);
+	LifeMovement = (LooksAge >= 70 ? 0.65f : LooksAge >= 55 ? 0.8f : 1.0f) * Style.Movement;
+
+	CasePain = FMath::Clamp(Case.Pain, 0.0f, 10.0f);
+	CaseDiscomfort = FMath::Max(FMath::Clamp(Case.Discomfort, 0.0f, 1.0f), Style.Discomfort);
+	SetPain(CasePain);
+	SetDiscomfort(CaseDiscomfort);
+	SetBreathing(Case.Breathing.IsEmpty() ? FString(TEXT("normal")) : Case.Breathing);
+	SetEmotion(Case.Mood.IsEmpty() ? FString(TEXT("neutral")) : Case.Mood, 0.6f);
+	UpdateLife();
+	UE_LOG(LogVIP, Display, TEXT("Case: character '%s', %s %d, mood %s, personality '%s', pain %.0f, breathing %s, discomfort %.2f, signs %d"),
+		*Case.Character, *Case.Gender, Case.Age, *Case.Mood, *Case.Personality, CasePain, *Case.Breathing, CaseDiscomfort, Case.VisibleSigns.Num());
+}
+
+void UVIPSpeechSubsystem::SetDiscomfort(float InDiscomfort)
+{
+	if (Discomfort < 0.2f && InDiscomfort >= 0.2f)
+	{
+		AvoidSide = PreferredSide;
+	}
+	Discomfort = FMath::Clamp(FMath::Max(InDiscomfort, CaseDiscomfort), 0.0f, 1.0f); // never below the case
+	UE_LOG(LogVIP, Display, TEXT("Discomfort %.2f"), Discomfort);
+}
+
+void UVIPSpeechSubsystem::StopSpeaking()
+{
+	if (Queue)
+	{
+		Queue->Clear();
+	}
+	if (Voice)
+	{
+		Voice->ResetAudio();
+	}
+	DelayedSound.Reset();
+	SpeakingUntil = FPlatformTime::Seconds();
+	Attention = TEXT("listening");
+	UE_LOG(LogVIP, Display, TEXT("Stopped speaking (interrupted)"));
+}
+
+void UVIPSpeechSubsystem::UpdateLife()
+{
+	if (!Life)
+	{
+		return;
+	}
+	FVIPLifeParams P;
+	P.Movement = LifeMovement;
+	const bool bSpeaking = FPlatformTime::Seconds() < SpeakingUntil;
+	if (bSpeaking)
+	{
+		// people look away more while they talk, and back to check on the listener
+		P.GlanceRate = 0.6f;
+		P.BlinkRate = 1.2f;
+	}
+	else if (Attention == TEXT("thinking"))
+	{
+		// eyes up and to one side, head following a little, blinking a bit more
+		P.Gaze = FVector2f(0.3f * ThinkSide, 0.3f);
+		P.HeadYaw = 1.5f * ThinkSide; // small: larger head turns make the collar clip (see VIPLife.cpp)
+		P.GlanceRate = 0;
+		P.BlinkRate = 1.3f;
+	}
+	else if (Attention == TEXT("listening"))
+	{
+		P.GlanceRate = 0.15f;
+		P.NodsPerMinute = 6;
+	}
+	// Personality (#45)
+	P.BlinkRate *= Style.BlinkRate;
+	P.GlanceRate = FMath::Clamp(P.GlanceRate + Style.GlanceRate, 0.0f, 1.0f);
+	P.NodsPerMinute *= Style.Nods;
+
+	// Discomfort pulls gaze and head down and aside, blinks more and stops nodding (#38)
+	const float D = DiscomfortShown;
+	if (D > 0.01f)
+	{
+		P.Gaze = FMath::Lerp(P.Gaze, FVector2f(0.2f * AvoidSide, -0.5f), D);
+		P.HeadPitch = FMath::Lerp(P.HeadPitch, DownPitchDegrees, D);
+		P.HeadYaw = FMath::Lerp(P.HeadYaw, 1.5f * AvoidSide, D);
+		P.BlinkRate *= 1.0f + D;
+		P.NodsPerMinute *= 1.0f - D;
+		P.GlanceRate = FMath::Lerp(P.GlanceRate, 0.0f, D);
+	}
+	Life->Set(P);
+}
+
+void UVIPSpeechSubsystem::SetEmotion(const FString& Emotion, float Intensity)
+{
+	const FString Name = Emotion.TrimStartAndEnd().ToLower();
+	if (!VIPExpressions::IsKnown(Name))
+	{
+		UE_LOG(LogVIP, Warning, TEXT("Unknown emotion '%s', using neutral"), *Emotion);
+	}
+	TargetEmotion = VIPExpressions::IsKnown(Name) ? Name : TEXT("neutral");
+	TargetIntensity = FMath::Clamp(Intensity, 0.0f, MaxIntensity);
+	EmotionSetAt = FPlatformTime::Seconds();
+	UE_LOG(LogVIP, Display, TEXT("Emotion %s %.2f"), *TargetEmotion, TargetIntensity);
+}
+
+void UVIPSpeechSubsystem::UpdateEmotion(float DeltaTime)
+{
+	// Full strength while speaking and for a while after, then a resting level until the next turn
+	const double Now = FPlatformTime::Seconds();
+	const bool bHolding = Now < FMath::Max(EmotionSetAt, SpeakingUntil) + HoldSeconds;
+	const float Wanted = TargetEmotion == TEXT("neutral") ? 0.0f : TargetIntensity * (bHolding ? 1.0f : RestFraction);
+	Level = Approach(Level, Wanted, DeltaTime, Wanted > Level ? RiseSeconds : FallSeconds);
+
+	// Our layer cross-fades: the old emotion fades out while the new one fades in
+	TMap<FString, float> Offsets;
+	for (const FString& Name : VIPExpressions::Names())
+	{
+		float& Weight = EmotionWeights.FindOrAdd(Name);
+		Weight = Approach(Weight, Name == TargetEmotion ? 1.0f : 0.0f, DeltaTime, CrossfadeSeconds);
+		VIPExpressions::Add(Name, Weight * Level, Offsets);
+	}
+	// Pain: a lasting face that follows the level, and short winces now and then from pain 3
+	PainShown = Approach(PainShown, FMath::Pow(PainLevel / 10.0f, 0.8f), DeltaTime, PainSeconds);
+	float Wince = 0;
+	if (PainLevel >= 3)
+	{
+		if (NextWince == 0)
+		{
+			NextWince = Now + FMath::FRandRange(3.0f, 8.0f);
+		}
+		if (WinceStart < 0 && Now >= NextWince)
+		{
+			WinceStart = Now;
+			NextWince = Now + FMath::FRandRange(6.0f, 16.0f) * (10.0f / PainLevel);
+		}
+	}
+	if (WinceStart >= 0)
+	{
+		const double T = Now - WinceStart;
+		Wince = static_cast<float>(T < WinceRise ? T / WinceRise : T < WinceRise + WinceHold ? 1.0 : FMath::Max(0.0, 1.0 - (T - WinceRise - WinceHold) / WinceFall));
+		if (T > WinceRise + WinceHold + WinceFall)
+		{
+			WinceStart = -1;
+		}
+	}
+	// Discomfort eases in over a second or two and out more slowly; it shows a little in the brows
+	DiscomfortShown = Approach(DiscomfortShown, Discomfort, DeltaTime, Discomfort > DiscomfortShown ? 1.2f : 2.5f);
+	if (DiscomfortShown > 0.01f)
+	{
+		Offsets.FindOrAdd(TEXT("CTRL_expressions_browRaiseInL")) += 0.25f * DiscomfortShown;
+		Offsets.FindOrAdd(TEXT("CTRL_expressions_browRaiseInR")) += 0.25f * DiscomfortShown;
+		Offsets.FindOrAdd(TEXT("CTRL_expressions_mouthCornerDepressL")) += 0.12f * DiscomfortShown;
+		Offsets.FindOrAdd(TEXT("CTRL_expressions_mouthCornerDepressR")) += 0.12f * DiscomfortShown;
+	}
+	if (Style.Squint > 0)
+	{
+		Offsets.FindOrAdd(TEXT("CTRL_expressions_eyeSquintInnerL")) += Style.Squint;
+		Offsets.FindOrAdd(TEXT("CTRL_expressions_eyeSquintInnerR")) += Style.Squint;
+		Offsets.FindOrAdd(TEXT("CTRL_expressions_browDownL")) += Style.Squint * 0.5f;
+		Offsets.FindOrAdd(TEXT("CTRL_expressions_browDownR")) += Style.Squint * 0.5f;
+	}
+	VIPExpressions::AddPain(PainShown + Wince * WinceStrength * FMath::Max(PainLevel, 3.0f) / 10.0f, Offsets);
+
+	// In silence, fade the solver's open-mouthed idle pose out to a closed, relaxed mouth
+	const bool bSpeaking = Now < SpeakingUntil;
+	Rest = Approach(Rest, bSpeaking ? 0.0f : 1.0f, DeltaTime, bSpeaking ? RestOutSeconds : RestInSeconds);
+	if (Expressions)
+	{
+		Expressions->Set(MoveTemp(Offsets));
+		Expressions->SetRest(Rest);
+	}
+
+	// The solver holds one mood up to 1: ramp down, switch, ramp up, so there is no jump
+	const float Step = SolverRampPerSecond * DeltaTime;
+	if (SolverEmotion != TargetEmotion)
+	{
+		SolverIntensity = FMath::Max(0.0f, SolverIntensity - Step);
+		if (SolverIntensity <= 0)
+		{
+			SolverEmotion = TargetEmotion;
+		}
+	}
+	else
+	{
+		const float SolverTarget = FMath::Min(Level, 1.0f);
+		SolverIntensity = SolverIntensity < SolverTarget ? FMath::Min(SolverTarget, SolverIntensity + Step) : SolverTarget;
+	}
+	ApplySolverMood();
+}
+
+void UVIPSpeechSubsystem::ApplySolverMood()
+{
+	if (!Settings || (SolverEmotion == AppliedSolverEmotion && FMath::Abs(SolverIntensity - AppliedSolverIntensity) < 0.01f))
+	{
+		return;
+	}
+	AppliedSolverEmotion = SolverEmotion;
+	AppliedSolverIntensity = SolverIntensity;
 
 	if (Settings->Subject)
 	{
-		Settings->SetMood(ToMood(Emotion));
-		Settings->SetMoodIntensity(Intensity);
+		Settings->Mood = ToMood(SolverEmotion);
+		Settings->SetMoodIntensity(SolverIntensity); // passes mood and intensity to the solver
 	}
 	else
 	{
 		// Live Link creates the subject a frame later and reads these then; the setters would crash now
-		Settings->Mood = ToMood(Emotion);
-		Settings->MoodIntensity = FMath::Clamp(Intensity, 0.0f, 1.0f);
+		Settings->Mood = ToMood(SolverEmotion);
+		Settings->MoodIntensity = FMath::Clamp(SolverIntensity, 0.0f, 1.0f);
 	}
 }
 
@@ -254,7 +795,23 @@ void UVIPSpeechSubsystem::Tick(float DeltaTime)
 	{
 		Voice->QueueAudio(reinterpret_cast<const uint8*>(DelayedSound.GetData()), DelayedSound.Num() * sizeof(int16));
 		DelayedSound.Reset();
+		if (bLatencySoundPending)
+		{
+			bLatencySoundPending = false;
+			UE_LOG(LogVIP, Display, TEXT("VIP latency: sound queued %.0f ms after Speak()"), (Now - LatencySpeakAt) * 1000.0);
+		}
 	}
+
+	if (NextTestMoodAt > 0 && Now >= NextTestMoodAt && TestMoods.Num() > 0)
+	{
+		SetEmotion(TestMoods[TestMoodIndex], TargetIntensity > 0 ? TargetIntensity : 1.0f);
+		TestMoodIndex = (TestMoodIndex + 1) % TestMoods.Num();
+		NextTestMoodAt = Now + TestMoodSeconds;
+	}
+
+	RunShots(Now);
+	UpdateEmotion(DeltaTime);
+	UpdateLife();
 
 	if (NextTestAt > 0 && Now >= NextTestAt)
 	{
@@ -264,7 +821,28 @@ void UVIPSpeechSubsystem::Tick(float DeltaTime)
 
 	if (bLogFace)
 	{
+		ProbeLatency(Now);
 		LogFace(DeltaTime);
+	}
+}
+
+void UVIPSpeechSubsystem::ProbeLatency(double Now)
+{
+	if (!bLatencyPending)
+	{
+		return;
+	}
+	if (ReadFaceValue(TEXT("CTRL_expressions_jawOpen")) > 0.05f)
+	{
+		bLatencyPending = false;
+		const double Mouth = Now - LatencySpeakAt;
+		UE_LOG(LogVIP, Display, TEXT("VIP latency: jaw opens %.0f ms after Speak(); voice starts %.0f ms into the audio, so the mouth leads the sound by %.0f ms (sound held back %.0f ms, audio device latency not included)"),
+			Mouth * 1000.0, LatencyVoiceOffset * 1000.0, (SoundDelaySeconds + LatencyVoiceOffset - Mouth) * 1000.0, SoundDelaySeconds * 1000.0);
+	}
+	else if (Now - LatencySpeakAt > 3.0)
+	{
+		bLatencyPending = false;
+		UE_LOG(LogVIP, Warning, TEXT("VIP latency: jaw did not open within 3 s of Speak()"));
 	}
 }
 
@@ -302,10 +880,26 @@ void UVIPSpeechSubsystem::LogFace(float DeltaTime)
 		const int32 Index = Static->PropertyNames.IndexOfByKey(FName(Name));
 		return Data->PropertyValues.IsValidIndex(Index) ? Data->PropertyValues[Index] : -1.0f;
 	};
+	if (FParse::Param(FCommandLine::Get(), TEXT("VIPDumpControls")))
+	{
+		FString High;
+		for (int32 i = 0; i < Static->PropertyNames.Num() && i < Data->PropertyValues.Num(); ++i)
+		{
+			if (FMath::Abs(Data->PropertyValues[i]) > 0.25f)
+			{
+				High += FString::Printf(TEXT("%s=%.2f "), *Static->PropertyNames[i].ToString(), Data->PropertyValues[i]);
+			}
+		}
+		UE_LOG(LogVIP, Display, TEXT("frame %d names %d values, high: %s"), Static->PropertyNames.Num(), Data->PropertyValues.Num(), *High);
+	}
 	UE_LOG(LogVIP, Display, TEXT("face %s: jaw=%.2f blink=%.2f headSwitch=%.0f yaw=%.1f pitch=%.1f"),
 		FPlatformTime::Seconds() < SpeakingUntil ? TEXT("speaking") : TEXT("silent"),
 		Value(TEXT("CTRL_expressions_jawOpen")), Value(TEXT("CTRL_expressions_eyeBlinkL")),
 		Value(TEXT("HeadControlSwitch")), Value(TEXT("HeadYaw")), Value(TEXT("HeadPitch")));
+	UE_LOG(LogVIP, Display, TEXT("mood %s level=%.2f solver=%s %.2f: browDown=%.2f browRaiseIn=%.2f cornerPull=%.2f cornerDepress=%.2f"),
+		*TargetEmotion, Level, *SolverEmotion, SolverIntensity,
+		Value(TEXT("CTRL_expressions_browDownL")), Value(TEXT("CTRL_expressions_browRaiseInL")),
+		Value(TEXT("CTRL_expressions_mouthCornerPullL")), Value(TEXT("CTRL_expressions_mouthCornerDepressL")));
 }
 
 void UVIPSpeechSubsystem::Deinitialize()

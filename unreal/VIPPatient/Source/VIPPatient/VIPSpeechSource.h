@@ -4,6 +4,9 @@
 #include "MetaHumanAudioBaseLiveLinkSubject.h"
 #include "MetaHumanLocalLiveLinkSource.h"
 
+class FVIPExpressionLayer;
+class FVIPLife;
+
 /** Speech waiting to be turned into face animation. Written by the game thread, read by the solver. */
 class FVIPSpeechQueue
 {
@@ -16,6 +19,9 @@ public:
 
 	/** Fills Out with the next samples, padded with silence. */
 	void Take(TArray<float>& Out, int32 Count);
+
+	/** Drops everything not yet animated (the patient was interrupted). */
+	void Clear();
 
 	const int32 SampleRate;
 
@@ -34,31 +40,30 @@ class FVIPSpeechSubject : public FMetaHumanAudioBaseLiveLinkSubject
 public:
 
 	FVIPSpeechSubject(ILiveLinkClient* InClient, const FGuid& InSourceGuid, const FName& InName,
-		UMetaHumanAudioBaseLiveLinkSubjectSettings* InSettings, TSharedRef<FVIPSpeechQueue> InQueue);
+		UMetaHumanAudioBaseLiveLinkSubjectSettings* InSettings, TSharedRef<FVIPSpeechQueue> InQueue,
+		TSharedRef<FVIPExpressionLayer> InExpressions, TSharedRef<FVIPLife> InLife);
 
 protected:
 
 	virtual void MediaSamplerMain() override;
 
-	/** Adds idle life on top of the solver: blinks and slight head motion. */
+	/** Adds on top of the solver: the emotion layer and idle life (eyes, blinks, head). */
 	virtual void ExtractPipelineData(TSharedPtr<UE::MetaHuman::Pipeline::FPipelineData> InPipelineData) override;
 
 private:
 
 	TSharedRef<FVIPSpeechQueue> Queue;
-
-	// Only touched on the pipeline thread
-	FRandomStream Random{FPlatformTime::Cycles()};
-	double StartTime = FPlatformTime::Seconds();
-	double NextBlink = 0;
-	double BlinkStart = -1;
+	TSharedRef<FVIPExpressionLayer> Expressions;
+	TSharedRef<FVIPLife> Life;
 };
 
 class FVIPSpeechSource : public FMetaHumanLocalLiveLinkSource
 {
 public:
 
-	explicit FVIPSpeechSource(TSharedRef<FVIPSpeechQueue> InQueue) : Queue(InQueue) {}
+	FVIPSpeechSource(TSharedRef<FVIPSpeechQueue> InQueue, TSharedRef<FVIPExpressionLayer> InExpressions,
+		TSharedRef<FVIPLife> InLife)
+		: Queue(InQueue), Expressions(InExpressions), Life(InLife) {}
 
 	virtual FText GetSourceType() const override;
 
@@ -70,4 +75,6 @@ protected:
 private:
 
 	TSharedRef<FVIPSpeechQueue> Queue;
+	TSharedRef<FVIPExpressionLayer> Expressions;
+	TSharedRef<FVIPLife> Life;
 };
