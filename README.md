@@ -109,7 +109,7 @@ teacher page (ElevenLabs SDK) --audio--> voice server /ws/stage --audio + emotio
 ```
 
 - Start the voice server on an address Unreal can reach (`--host 0.0.0.0`; `/ws/*` is refused through the public tunnel).
-- Start Unreal with `VIP_SERVER=ws://<voice-server-host>:8787/ws/unreal unreal/build.sh --run`, or pass `-VIPServer=ws://...` to the editor or the packaged app.
+- Start Unreal with `VIP_SERVER=ws://<voice-server-ip>:8787/ws/unreal unreal/build.sh --run`, or pass `-VIPServer=ws://...` to the editor or the packaged app. Use an IPv4 address (e.g. `127.0.0.1` or the host's Tailscale IP), not `localhost` or a hostname: the voice server listens on IPv4 only, and macOS may try IPv6 first.
 - Messages to Unreal, as JSON text:
   - `{"type":"audio","sample_rate":16000,"pcm_b64":...}`: the patient's voice as mono 16-bit PCM → `UVIPSpeechSubsystem::Speak`;
   - `{"type":"emotion","emotion":"sad","intensity":0.6}` → `SetEmotion` (the case's starting mood for now);
@@ -121,9 +121,10 @@ teacher page (ElevenLabs SDK) --audio--> voice server /ws/stage --audio + emotio
 The repository holds only our project file, config, C++ module and build scripts. The MetaHuman is **rebuilt on your machine** from an Epic preset, so no Epic assets are published.
 
 **You need**
-- macOS (tested on an M4 MacBook Air with 16 GB, Xcode 26.6) or Windows (**not tested yet**; needs Visual Studio 2022 with "Game development with C++"). Linux is not supported.
+- macOS (tested on an M4 MacBook Air with 16 GB, Xcode 26.6, and an M2 Pro MacBook Pro with 16 GB, Xcode 27) or Windows (**not tested yet**; needs Visual Studio 2022 with "Game development with C++"). Linux is not supported.
 - Unreal Engine 5.8 with **MetaHuman Creator Core Data** (Epic Games Launcher → 5.8 → Options)
 - An Epic account signed in through the launcher, and internet: textures and rig come from Epic's online services
+- On Xcode 26 or later, the Metal toolchain (Unreal compiles its shaders with it; without it the first build stops with "missing Metal Toolchain"): `xcodebuild -downloadComponent MetalToolchain`
 - About 5 GB of free disk space (more for packaging), and a short repository path without spaces
 
 macOS:
@@ -138,7 +139,7 @@ Windows (PowerShell, from the repository folder; the policy flag applies to this
 powershell -ExecutionPolicy Bypass -File unreal\build.ps1 -Run
 ```
 
-The first build takes around 10 minutes per patient on the Mac we tested. Later runs skip what is already built. Options on macOS:
+The first build takes around 10 minutes per patient on the Mac we tested (about 15 on a second Mac, with Unreal on a USB drive). During the first step Epic may ask you to sign in; the build waits for it. Building the MetaHuman briefly needs more than 16 GB of memory, so close other heavy apps. Later runs skip what is already built. Options on macOS:
 
 - `unreal/build.sh` builds without opening the window
 - `unreal/build.sh --clean` rebuilds from scratch
