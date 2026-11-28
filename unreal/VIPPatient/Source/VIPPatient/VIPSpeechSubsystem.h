@@ -11,6 +11,7 @@ class FVIPSpeechQueue;
 class UMetaHumanAudioBaseLiveLinkSubjectSettings;
 class UAudioComponent;
 class USkeletalMeshComponent;
+class UVIPBodyAnimInstance;
 class USoundWaveProcedural;
 
 /**
@@ -59,6 +60,15 @@ public:
 	 */
 	void SetPain(float InLevel);
 
+	/**
+	 * Breathing (#36): breaths per minute, depth (1 normal, below shallow, above deep) and how much
+	 * the shoulders lift (0 to 1, laboured breathing). Changes ease in over a few seconds.
+	 */
+	void SetBreathing(float PerMinute, float InDepth, float Shoulders);
+
+	/** A named pattern: normal, fast_shallow, laboured, slow_deep, or a rate such as "22". */
+	void SetBreathing(const FString& Pattern);
+
 	/** The student interrupted: stop talking now and look at them (#25, #37). */
 	void StopSpeaking();
 
@@ -71,6 +81,7 @@ private:
 	void StartSource(int32 SampleRate);
 	void DriveFace();
 	void AnimateBody(USkeletalMeshComponent& Body);
+	void ApplyBreathing();
 	void UpdateEmotion(float DeltaTime);
 	void UpdateLife();
 	void ApplySolverMood();
@@ -111,6 +122,12 @@ private:
 	double EmotionSetAt = 0;
 	float Level = 0;
 	float Rest = 1;
+	UPROPERTY()
+	TObjectPtr<UVIPBodyAnimInstance> BodyAnim;
+	float BreathsPerMinute = 14;
+	float BreathDepth = 1;
+	float BreathShoulders = 0.15f;
+
 	float PainLevel = 0;  // 0 to 10, what was asked for
 	float PainShown = 0;  // 0 to 1, smoothed
 	double WinceStart = -1;

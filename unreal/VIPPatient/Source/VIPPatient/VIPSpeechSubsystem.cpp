@@ -1,5 +1,6 @@
 #include "VIPSpeechSubsystem.h"
 
+#include "VIPBody.h"
 #include "VIPExpressions.h"
 #include "VIPLife.h"
 #include "VIPPatients.h"
@@ -154,6 +155,11 @@ void UVIPSpeechSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 		bLogFace = true;
 	}
 	SetEmotion(Emotion, Intensity);
+	FString Breathing;
+	if (FParse::Value(FCommandLine::Get(), TEXT("VIPBreathing="), Breathing))
+	{
+		SetBreathing(Breathing);
+	}
 	float Pain = 0;
 	if (FParse::Value(FCommandLine::Get(), TEXT("VIPPain="), Pain))
 	{
@@ -192,6 +198,11 @@ void UVIPSpeechSubsystem::ApplyTestStep(const FString& Step)
 	if (Step.StartsWith(TEXT("pain=")))
 	{
 		SetPain(FCString::Atof(*Step.Mid(5)));
+		return;
+	}
+	if (Step.StartsWith(TEXT("breathing=")))
+	{
+		SetBreathing(Step.Mid(10));
 		return;
 	}
 	if (Step == TEXT("wince"))
@@ -257,11 +268,16 @@ void UVIPSpeechSubsystem::AnimateBody(USkeletalMeshComponent& Body)
 	if (!Idle)
 	{
 		UE_LOG(LogVIP, Warning, TEXT("Body idle %s not found, body stays in its rest pose"), *Path);
+	}
+	Body.SetAnimInstanceClass(UVIPBodyAnimInstance::StaticClass());
+	BodyAnim = Cast<UVIPBodyAnimInstance>(Body.GetAnimInstance());
+	if (!BodyAnim || !Idle)
+	{
 		return;
 	}
-	Body.PlayAnimation(Idle, true);
-	Body.SetPosition(FMath::FRandRange(0.0f, Idle->GetPlayLength())); // patients do not all start alike
-	UE_LOG(LogVIP, Display, TEXT("Body plays %s"), *Idle->GetName());
+	BodyAnim->Idle = Idle;
+	ApplyBreathing();
+	UE_LOG(LogVIP, Display, TEXT("Body plays %s with breathing"), *Idle->GetName());
 }
 
 void UVIPSpeechSubsystem::DriveFace()
@@ -402,6 +418,41 @@ void UVIPSpeechSubsystem::SetAttention(const FString& State)
 	}
 	Attention = NewAttention;
 	UE_LOG(LogVIP, Display, TEXT("Attention %s"), *Attention);
+}
+
+void UVIPSpeechSubsystem::SetBreathing(float PerMinute, float InDepth, float Shoulders)
+{
+	BreathsPerMinute = FMath::Clamp(PerMinute, 4.0f, 50.0f);
+	BreathDepth = FMath::Clamp(InDepth, 0.2f, 3.0f);
+	BreathShoulders = FMath::Clamp(Shoulders, 0.0f, 1.0f);
+	UE_LOG(LogVIP, Display, TEXT("Breathing %.0f/min depth %.1f shoulders %.1f"), BreathsPerMinute, BreathDepth, BreathShoulders);
+	ApplyBreathing();
+}
+
+void UVIPSpeechSubsystem::SetBreathing(const FString& Pattern)
+{
+	// The patterns the case can name (#36); a number alone is a rate at normal depth
+	const FString Name = Pattern.TrimStartAndEnd().ToLower();
+	if (Name == TEXT("normal"))           { SetBreathing(14, 1.0f, 0.15f); }
+	else if (Name == TEXT("fast_shallow")) { SetBreathing(28, 0.55f, 0.35f); }
+	else if (Name == TEXT("laboured") || Name == TEXT("labored")) { SetBreathing(24, 1.6f, 1.0f); }
+	else if (Name == TEXT("slow_deep"))    { SetBreathing(9, 1.5f, 0.2f); }
+	else if (Name.IsNumeric())             { SetBreathing(FCString::Atof(*Name), 1.0f, 0.2f); }
+	else
+	{
+		UE_LOG(LogVIP, Warning, TEXT("Unknown breathing '%s', using normal"), *Pattern);
+		SetBreathing(14, 1.0f, 0.15f);
+	}
+}
+
+void UVIPSpeechSubsystem::ApplyBreathing()
+{
+	if (BodyAnim)
+	{
+		BodyAnim->BreathsPerMinute = BreathsPerMinute;
+		BodyAnim->Depth = BreathDepth;
+		BodyAnim->ShoulderUse = BreathShoulders;
+	}
 }
 
 void UVIPSpeechSubsystem::SetPain(float InLevel)
