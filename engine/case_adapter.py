@@ -78,6 +78,18 @@ MOODS = {
     "disgust": "irritated, put off",
     "anger": "annoyed, angry",
     "surprise": "surprised, unsettled",
+    "boredom": "bored, flat",
+    "confidence": "confident, self-assured",
+    "confusion": "confused, unsure",
+    "excitement": "excited, keyed up",
+    "playfulness": "playful, joking",
+}
+
+# How the case's breathing (presentation.breathing, shown by Unreal) changes the way the patient talks.
+BREATHING_SPEECH = {
+    "fast_shallow": "short of breath: speaks in short phrases and pauses to catch breath",
+    "laboured": "badly short of breath: only a few words at a time, stops mid-sentence to breathe",
+    "slow_deep": "breathes slowly and heavily, speaks slowly",
 }
 
 
@@ -104,6 +116,14 @@ def teacher_case_to_config(case: dict[str, Any], *, setting: str = DEFAULT_SETTI
     style = profile.get("style") or description or "everyday words, natural spoken style"
     if description and profile:
         style = f"{style}. {description}"
+    presentation = case.get("presentation") or {}
+    breathing_raw = presentation.get("breathing", "")
+    if isinstance(breathing_raw, (int, float)):  # a rate per minute
+        breathing_raw = "fast_shallow" if breathing_raw >= 24 else "slow_deep" if breathing_raw <= 10 else ""
+    breathing = BREATHING_SPEECH.get(str(breathing_raw))
+    if breathing:
+        style = f"{style.rstrip('. ')}. {breathing.capitalize()}."
+    pain = presentation.get("pain")
 
     return PatientConfig.model_validate({
         "case_id": case["case_id"],
@@ -123,6 +143,7 @@ def teacher_case_to_config(case: dict[str, Any], *, setting: str = DEFAULT_SETTI
             "cooperation_level": profile.get("cooperation", "moderate"),
             "emotional_triggers": profile.get("triggers", []),
             "rapport_builders": profile.get("rapport", []),
+            "pain_level": round(pain) if isinstance(pain, (int, float)) else None,
         },
         "information_tiers": {
             "spontaneous": spontaneous,

@@ -55,3 +55,21 @@ def test_no_preference_personality():
     config = load_patient_config(case)
     assert "ordinary" in config.affect_profile.communication_style
     assert config.affect_profile.cooperation_level == "high"
+
+
+def test_presentation_reaches_the_prompt():
+    import copy
+
+    from case_adapter import teacher_case_to_config
+    from prompt_builder import build_system_prompt
+
+    base = json.loads((Path(__file__).resolve().parents[2] / "cases" / "case-001.json").read_text(encoding="utf-8"))
+    case = copy.deepcopy(base)
+    case["presentation"] = {"pain": 6, "breathing": "laboured"}
+    config = teacher_case_to_config(case)
+    assert config.affect_profile.pain_level == 6
+    assert "short of breath" in config.affect_profile.communication_style.lower()
+    assert "6/10" in build_system_prompt(config)
+    case["presentation"] = {"breathing": 30}
+    assert "short of breath" in teacher_case_to_config(case).affect_profile.communication_style.lower()
+    assert teacher_case_to_config(base).affect_profile.pain_level is None

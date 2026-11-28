@@ -81,8 +81,27 @@ def build_case(payload: dict, case_id: str) -> dict:
         },
         **{category: [item.strip() for item in payload.get(category, []) if item.strip()] for category in FACT_CATEGORIES},
     }
+    presentation = build_presentation(payload.get("presentation"))
+    if presentation:
+        case["presentation"] = presentation
     case["evaluation_fact_ids"] = make_evaluation_ids(case)
     return case
+
+
+def build_presentation(raw) -> dict:
+    """How the illness shows in the MetaHuman (optional; the schema checks the values)."""
+    if not isinstance(raw, dict):
+        return {}
+    presentation = {}
+    for key in ("pain", "discomfort"):
+        if isinstance(raw.get(key), (int, float)) and not isinstance(raw.get(key), bool):
+            presentation[key] = raw[key]
+    if raw.get("breathing") not in (None, ""):
+        presentation["breathing"] = raw["breathing"]
+    signs = raw.get("visible_signs")
+    if isinstance(signs, list) and signs:
+        presentation["visible_signs"] = signs
+    return presentation
 
 
 def validate_case(case: dict) -> list[str]:
