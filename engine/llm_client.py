@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
 from typing import Any
 
 from dotenv import load_dotenv
@@ -129,6 +130,43 @@ class ChatActorClient:
                 raise ValueError("system_prompt must not be empty.")
             self._system_prompt = cleaned
         self._messages = [{"role": "system", "content": self._system_prompt}]
+
+    def stream_reply(self, history: list[dict[str, str]]) -> Iterator[str]:
+        """Stream the patient's reply for an external conversation history.
+
+        Stateless: ``history`` holds the student/patient turns (roles ``user`` and
+        ``assistant``) as kept by the caller, e.g. ElevenLabs Agents, which sends
+        the full history on every turn. Our system prompt is always prepended; any
+        system message in ``history`` is ignored. The client's own history is not
+        changed.
+        """
+        turns = [
+            {"role": m["role"], "content": m["content"]}
+            for m in history
+            if m.get("role") in ("user", "assistant") and isinstance(m.get("content"), str) and m["content"].strip()
+        ]
+        request_kwargs: dict[str, Any] = {
+            "model": self._model,
+            "messages": [{"role": "system", "content": self._system_prompt}, *turns],
+            "max_completion_tokens": self._max_tokens,
+            "stream": True,
+        }
+        if self._reasoning_effort is not None:
+            request_kwargs["reasoning_effort"] = self._reasoning_effort
+        if self._reasoning_effort in (None, "none"):
+            request_kwargs["temperature"] = self._temperature
+
+        try:
+            stream = self._client.chat.completions.create(**request_kwargs)
+            for chunk in stream:
+                choices = getattr(chunk, "choices", None) or []
+                if not choices:
+                    continue
+                delta = getattr(choices[0].delta, "content", None)
+                if delta:
+                    yield delta
+        except OpenAIError as exc:
+            raise LLMClientError(f"OpenAI API request failed: {exc}") from exc
 
     def send_message(self, user_message: str) -> str:
         """Send a student turn to the model and return the patient's reply."""
