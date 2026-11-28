@@ -166,7 +166,10 @@ def create_app(session: PatientSession | None = None, *, load_case: bool = True)
         except Exception as exc:  # validation errors, bad JSON, LLM client setup
             raise HTTPException(422, f"could not load case: {exc}") from exc
         demo = s.config.demographics
-        return {"case_id": s.config.case_id, "name": demo.full_name, "age": demo.age, "talk_url": talk_url()}
+        return {
+            "case_id": s.config.case_id, "name": demo.full_name, "age": demo.age,
+            "agent_id": (os.getenv("ELEVENLABS_AGENT_ID") or "").strip() or None, "talk_url": talk_url(),
+        }
 
     @app.get("/v1/models")
     def models() -> dict[str, Any]:

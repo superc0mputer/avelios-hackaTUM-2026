@@ -17,7 +17,8 @@ os.environ["VOICE_SERVER_NO_AUTOLOAD"] = "1"
 from case_adapter import load_patient_config  # noqa: E402
 from prompt_builder import build_system_prompt  # noqa: E402
 
-TEACHER_CASES = sorted(p for p in CASES_DIR.glob("case-*.json"))
+# The example cases in the repo (locally saved test cases may differ).
+TEACHER_CASES = [CASES_DIR / "case-001.json", CASES_DIR / "case-002.json"]
 
 
 @pytest.mark.parametrize("path", TEACHER_CASES, ids=lambda p: p.name)
@@ -29,7 +30,7 @@ def test_teacher_case_maps_to_patient_config(path):
     assert config.demographics.full_name == case["patient"]["name"]
     assert tiers.spontaneous == case["symptoms"][:1]
     assert tiers.gated_secrets == case["secrets"]
-    assert tiers.unlock_condition
+    assert bool(tiers.unlock_condition) == bool(case["secrets"])
     for category in ("medical_history", "medications", "allergies", "family_history", "lifestyle"):
         for fact in case[category]:
             assert fact in tiers.on_specific_query
