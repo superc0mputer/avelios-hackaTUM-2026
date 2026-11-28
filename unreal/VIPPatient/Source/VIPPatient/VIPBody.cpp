@@ -39,6 +39,33 @@ namespace
 		float Shoulders = 0.2f;
 		float Smoothed[3] = {14, 1, 0.2f};
 
+		// Seated (doctor's office): legs bent at hip and knee, the rest of the body as before
+		bool bSeated = true;
+		struct FBoneTurn { FName Bone; FVector Axis; float Degrees; };
+		TArray<FBoneTurn> SeatPose;
+		// Testing: -VIPPose=thigh_l:z:70,calf_l:z:-80 adds rotations (to find axes and angles)
+		TArray<FBoneTurn> TestPose;
+
+		static TArray<FBoneTurn> ParsePose(const FString& Text)
+		{
+			TArray<FBoneTurn> Result;
+			TArray<FString> Items;
+			Text.ParseIntoArray(Items, TEXT(","));
+			for (const FString& Item : Items)
+			{
+				TArray<FString> Parts;
+				Item.ParseIntoArray(Parts, TEXT(":"));
+				if (Parts.Num() != 3)
+				{
+					continue;
+				}
+				const FString AxisName = Parts[1].ToLower();
+				const FVector Axis = AxisName == TEXT("x") ? FVector::XAxisVector : AxisName == TEXT("y") ? FVector::YAxisVector : FVector::ZAxisVector;
+				Result.Add({FName(*Parts[0]), Axis, FCString::Atof(*Parts[2])});
+			}
+			return Result;
+		}
+
 		// Testing: exaggerated rotation about one axis, to find each bone's axes
 		int32 TestAxis = -1;
 		float TestHold = -1; // 0 = breathed out, 1 = breathed in, for comparing screenshots
@@ -124,6 +151,18 @@ namespace
 				return true;
 			}
 
+			if (bSeated)
+			{
+				for (const FBoneTurn& Turn : SeatPose)
+				{
+					Rotate(Output, *Turn.Bone.ToString(), Turn.Axis, Turn.Degrees);
+				}
+			}
+			for (const FBoneTurn& Turn : TestPose)
+			{
+				Rotate(Output, *Turn.Bone.ToString(), Turn.Axis, Turn.Degrees);
+			}
+
 			const float Breath = (TestHold >= 0 ? TestHold : BreathShape(Phase)) * Smoothed[1];
 			// Only the shoulders move: bending the spine opens a gap between collar and neck, because
 			// the face mesh's neck does not follow changes to the body's spine
@@ -141,6 +180,13 @@ FAnimInstanceProxy* UVIPBodyAnimInstance::CreateAnimInstanceProxy()
 	FVIPBodyProxy* Proxy = new FVIPBodyProxy(this);
 	FParse::Value(FCommandLine::Get(), TEXT("VIPBoneTest="), Proxy->TestAxis);
 	FParse::Value(FCommandLine::Get(), TEXT("VIPBreathHold="), Proxy->TestHold);
+	Proxy->bSeated = !FParse::Param(FCommandLine::Get(), TEXT("VIPStand"));
+	Proxy->SeatPose = FVIPBodyProxy::ParsePose(VIPBody::SeatPose);
+	FString Pose;
+	if (FParse::Value(FCommandLine::Get(), TEXT("VIPPose="), Pose, false))
+	{
+		Proxy->TestPose = FVIPBodyProxy::ParsePose(Pose);
+	}
 	return Proxy;
 }
 

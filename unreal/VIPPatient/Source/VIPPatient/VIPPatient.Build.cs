@@ -9,7 +9,7 @@ public class VIPPatient : ModuleRules
 		PrivateDependencyModuleNames.AddRange(new string[] {
 			"Core",
 			"CoreUObject",
-			"Engine",
+			"Engine", "CinematicCamera",
 			"LiveLinkInterface",
 			"LiveLink",
 			"MetaHumanCoreTech",
