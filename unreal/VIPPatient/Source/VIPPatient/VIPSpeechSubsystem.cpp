@@ -4,6 +4,7 @@
 #include "VIPExpressions.h"
 #include "VIPLife.h"
 #include "VIPPatients.h"
+#include "VIPSigns.h"
 #include "VIPSpeechSource.h"
 
 #include "Animation/AnimInstance.h"
@@ -18,6 +19,7 @@
 #include "Roles/LiveLinkBasicRole.h"
 #include "Camera/CameraActor.h"
 #include "Kismet/GameplayStatics.h"
+#include "Materials/MaterialInterface.h"
 #include "MetaHumanAudioBaseLiveLinkSubjectSettings.h"
 #include "Misc/CommandLine.h"
 #include "Misc/FileHelper.h"
@@ -228,6 +230,17 @@ void UVIPSpeechSubsystem::ApplyTestStep(const FString& Step)
 		SetDiscomfort(FCString::Atof(*Step.Mid(11)));
 		return;
 	}
+	if (Step.StartsWith(TEXT("signs=")))
+	{
+		// "signs=pale+sweaty" ("+" because "," separates steps); "signs=" removes them
+		TArray<FString> Signs;
+		Step.Mid(6).ParseIntoArray(Signs, TEXT("+"));
+		if (Patient.IsValid())
+		{
+			VIPSigns::Apply(*Patient, Signs);
+		}
+		return;
+	}
 	if (Step == TEXT("wince"))
 	{
 		WinceStart = FPlatformTime::Seconds() + ShotSettleSeconds - 0.3; // at its peak when the shot is taken
@@ -323,6 +336,25 @@ void UVIPSpeechSubsystem::DriveFace()
 				UE_LOG(LogVIP, Display, TEXT("mesh %s.%s: mode %d, anim %s, leader %s, bones %d"), *It->GetName(), *Mesh->GetName(),
 					static_cast<int32>(Mesh->GetAnimationMode()), Mesh->GetAnimClass() ? *Mesh->GetAnimClass()->GetName() : TEXT("none"),
 					Mesh->LeaderPoseComponent.IsValid() ? *Mesh->LeaderPoseComponent->GetName() : TEXT("none"), Mesh->GetNumBones());
+				for (int32 Slot = 0; Slot < Mesh->GetNumMaterials(); ++Slot)
+				{
+					UMaterialInterface* Material = Mesh->GetMaterial(Slot);
+					if (!Material)
+					{
+						continue;
+					}
+					TArray<FMaterialParameterInfo> Infos;
+					TArray<FGuid> Ids;
+					FString Names;
+					Material->GetAllScalarParameterInfo(Infos, Ids);
+					for (const FMaterialParameterInfo& Info : Infos) { Names += Info.Name.ToString() + TEXT("; "); }
+					Names += TEXT("| vectors: ");
+					Material->GetAllVectorParameterInfo(Infos, Ids);
+					for (const FMaterialParameterInfo& Info : Infos) { Names += Info.Name.ToString() + TEXT("; "); }
+					const TArray<FName> SlotNames = Mesh->GetMaterialSlotNames();
+					const FString SlotName = SlotNames.IsValidIndex(Slot) ? SlotNames[Slot].ToString() : FString(TEXT("?"));
+					UE_LOG(LogVIP, Display, TEXT("material %s slot %d (%s) %s: %s"), *Mesh->GetName(), Slot, *SlotName, *Material->GetName(), *Names);
+				}
 			}
 			if (Mesh->GetName() == TEXT("Body"))
 			{
@@ -496,8 +528,22 @@ void UVIPSpeechSubsystem::ApplyCase(const FVIPCase& Case)
 		return;
 	}
 	int32 LooksAge = 72; // Walter, the patient placed in the level
-	VIPPatients::Choose(*World, Case.Gender, Case.Age, &LooksAge, Case.Character);
+	Patient = VIPPatients::Choose(*World, Case.Gender, Case.Age, &LooksAge, Case.Character);
 	DriveFace(); // also restarts the body animation of a newly spawned patient
+
+	// Visible signs of illness (#34); -VIPSigns=pale,sweaty adds to the case's
+	TArray<FString> Signs = Case.VisibleSigns;
+	FString ExtraSigns;
+	if (FParse::Value(FCommandLine::Get(), TEXT("VIPSigns="), ExtraSigns, false))
+	{
+		TArray<FString> Extra;
+		ExtraSigns.ParseIntoArray(Extra, TEXT(","));
+		Signs.Append(Extra);
+	}
+	if (Patient.IsValid())
+	{
+		VIPSigns::Apply(*Patient, Signs);
+	}
 
 	// Older patients move less and slower; personality shows in blinking, gaze and movement
 	Style = FVIPPersonalityStyle::For(Case.Personality);

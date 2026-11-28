@@ -148,6 +148,7 @@ private:
 	float AvoidSide = 1;
 
 	FVIPPersonalityStyle Style;
+	TWeakObjectPtr<AActor> Patient;
 	float CasePain = 0;
 	float CaseDiscomfort = 0;
 
