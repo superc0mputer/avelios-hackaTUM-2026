@@ -173,7 +173,7 @@ void UVIPVideoStream::Tick(float DeltaTime)
 
 	// Frames arrive a few render frames later; send the newest one
 	TArray<FCapturedFrameData> Frames = Grabber->GetCapturedFrames();
-	if (Frames.Num() > 0 && !bEncoding->load())
+	if (Frames.Num() > 0 && InFlight->load() < MaxInFlight)
 	{
 		FCapturedFrameData& Newest = Frames.Last();
 		EncodeAndSend(MoveTemp(Newest.ColorBuffer), Newest.BufferSize);
@@ -186,13 +186,15 @@ void UVIPVideoStream::EncodeAndSend(TArray<FColor>&& Pixels, FIntPoint Size)
 	{
 		return;
 	}
-	bEncoding->store(true);
-	TSharedRef<std::atomic<bool>> Busy = bEncoding;
+	InFlight->fetch_add(1);
+	TSharedRef<std::atomic<int32>> Busy = InFlight;
+	TSharedRef<std::atomic<int64>> Sent = LastSent;
+	const int64 Sequence = NextSequence++;
 	TWeakObjectPtr<UWorld> WeakWorld(GetWorld());
 
 	const FIntPoint OutSize = FrameSize;
 	const int32 Quality = JpegQuality;
-	Async(EAsyncExecution::ThreadPool, [Pixels = MoveTemp(Pixels), Size, OutSize, Quality, Busy, WeakWorld]() mutable
+	Async(EAsyncExecution::ThreadPool, [Pixels = MoveTemp(Pixels), Size, OutSize, Quality, Busy, Sent, Sequence, WeakWorld]() mutable
 	{
 		const TArray<FColor> Small = ScaleDown(MoveTemp(Pixels), Size, OutSize);
 		IImageWrapperModule& Images = FModuleManager::LoadModuleChecked<IImageWrapperModule>(TEXT("ImageWrapper"));
@@ -203,9 +205,14 @@ void UVIPVideoStream::EncodeAndSend(TArray<FColor>&& Pixels, FIntPoint Size)
 		{
 			Compressed = Jpeg->GetCompressed(Quality);
 		}
-		AsyncTask(ENamedThreads::GameThread, [Compressed = MoveTemp(Compressed), Busy, WeakWorld]()
+		AsyncTask(ENamedThreads::GameThread, [Compressed = MoveTemp(Compressed), Busy, Sent, Sequence, WeakWorld]()
 		{
-			Busy->store(false);
+			Busy->fetch_sub(1);
+			if (Sequence < Sent->load())
+			{
+				return; // a newer frame already went out
+			}
+			Sent->store(Sequence);
 			UWorld* World = WeakWorld.Get();
 			UVIPBackendLink* Link = World ? World->GetSubsystem<UVIPBackendLink>() : nullptr;
 			if (Link && Compressed.Num() > 0)

@@ -39,6 +39,8 @@ private:
 	void StopCapture();
 	void EncodeAndSend(TArray<FColor>&& Pixels, FIntPoint Size);
 
+	static constexpr int32 MaxInFlight = 3;
+
 	TSharedPtr<FFrameGrabber> Grabber;
 
 	// Set when the capture starts (window size and -VIPVideo* options)
@@ -49,6 +51,9 @@ private:
 	int32 Viewers = 0;
 	double NextFrameAt = 0;
 
-	// One JPEG in flight at a time; frames that arrive meanwhile are skipped
-	TSharedRef<std::atomic<bool>> bEncoding = MakeShared<std::atomic<bool>>(false);
+	// Up to MaxInFlight JPEGs are encoded in parallel; one that finishes after a newer frame was
+	// sent is dropped, so the picture never jumps back
+	TSharedRef<std::atomic<int32>> InFlight = MakeShared<std::atomic<int32>>(0);
+	int64 NextSequence = 0;
+	TSharedRef<std::atomic<int64>> LastSent = MakeShared<std::atomic<int64>>(-1);
 };
