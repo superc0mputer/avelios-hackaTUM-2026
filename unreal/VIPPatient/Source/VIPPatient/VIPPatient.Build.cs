@@ -20,6 +20,9 @@ public class VIPPatient : ModuleRules
 			// Link to the voice server (VIPBackendLink)
 			"WebSockets",
 			"Json",
+			// Keep the mouse free in the patient window (VIPWindow)
+			"Slate",
+			"SlateCore",
 		});
 	}
 }
