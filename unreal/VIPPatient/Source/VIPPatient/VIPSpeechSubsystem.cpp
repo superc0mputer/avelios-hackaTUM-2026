@@ -1,4 +1,8 @@
 #include "VIPSpeechSubsystem.h"
+#include "CineCameraComponent.h"
+#include "GameFramework/Pawn.h"
+#include "Engine/StaticMesh.h"
+#include "Components/StaticMeshComponent.h"
 
 #include "VIPBody.h"
 #include "VIPExpressions.h"
@@ -215,6 +219,59 @@ void UVIPSpeechSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 		}
 	}
 
+	// The default player pawn is a grey sphere at the patient's feet: never show it
+	for (TActorIterator<APawn> It(&InWorld); It; ++It)
+	{
+		It->SetActorHiddenInGame(true);
+		It->SetActorEnableCollision(false);
+	}
+
+	// -VIPDumpScene: list every mesh in the level with its owner (finding stray objects)
+	if (FParse::Param(FCommandLine::Get(), TEXT("VIPDumpScene")))
+	{
+		for (TActorIterator<AActor> It(&InWorld); It; ++It)
+		{
+			TInlineComponentArray<UMeshComponent*> Meshes(*It);
+			for (const UMeshComponent* Mesh : Meshes)
+			{
+				const UStaticMeshComponent* Static = Cast<UStaticMeshComponent>(Mesh);
+				const FBoxSphereBounds Bounds = Mesh->Bounds;
+				UE_LOG(LogVIP, Display, TEXT("VIP scene: %s / %s (%s) visible=%d at %s size %s"), *It->GetName(), *Mesh->GetName(),
+					Static && Static->GetStaticMesh() ? *Static->GetStaticMesh()->GetName() : *Mesh->GetClass()->GetName(),
+					Mesh->IsVisible() ? 1 : 0, *Bounds.Origin.ToCompactString(), *(Bounds.BoxExtent * 2).ToCompactString());
+			}
+		}
+	}
+
+	// -VIPCamera=x,y,z,pitch,yaw[,focal mm]: put the camera anywhere (looking at the room from outside the doctor's chair)
+	FString CameraSpec;
+	if (FParse::Value(FCommandLine::Get(), TEXT("VIPCamera="), CameraSpec, false))
+	{
+		TArray<FString> Parts;
+		CameraSpec.ParseIntoArray(Parts, TEXT(","));
+		if (Parts.Num() >= 5)
+		{
+			for (TActorIterator<ACameraActor> It(&InWorld); It; ++It)
+			{
+				UCineCameraComponent* Lens = Cast<UCineCameraComponent>(It->GetCameraComponent());
+				if (Lens && Parts.Num() >= 6)
+				{
+					Lens->SetCurrentFocalLength(FCString::Atof(*Parts[5]));
+				}
+				It->SetActorLocationAndRotation(FVector(FCString::Atof(*Parts[0]), FCString::Atof(*Parts[1]), FCString::Atof(*Parts[2])),
+					FRotator(FCString::Atof(*Parts[3]), FCString::Atof(*Parts[4]), 0));
+				It->Tags.Remove(TEXT("VIPFollowHead"));
+			}
+		}
+	}
+
+	// -VIPTurn=90: turn the patient for a side view (testing the seated pose)
+	float Turn = 0;
+	if (FParse::Value(FCommandLine::Get(), TEXT("VIPTurn="), Turn) && Patient.IsValid())
+	{
+		Patient->AddActorWorldRotation(FRotator(0, Turn, 0));
+	}
+
 	FString Shots;
 	if (FParse::Value(FCommandLine::Get(), TEXT("VIPShots="), Shots, false))
 	{
@@ -383,6 +440,17 @@ void UVIPSpeechSubsystem::DriveFace()
 			if (Mesh->GetName() == TEXT("Body"))
 			{
 				AnimateBody(*Mesh);
+				// The outfit is a second skeletal mesh; without following the body it keeps the
+				// standing legs when the patient sits (shorts hang like a sack)
+				for (USkeletalMeshComponent* Other : Meshes)
+				{
+					if (Other != Mesh && Other->GetName() != TEXT("Face") && Other->GetNumBones() > 0
+						&& Other->LeaderPoseComponent.Get() != Mesh)
+					{
+						Other->SetLeaderPoseComponent(Mesh);
+						UE_LOG(LogVIP, Display, TEXT("%s follows the body pose"), *Other->GetName());
+					}
+				}
 				continue;
 			}
 			if (Mesh->GetName() != TEXT("Face"))
@@ -791,6 +859,35 @@ void UVIPSpeechSubsystem::Tick(float DeltaTime)
 	Super::Tick(DeltaTime);
 
 	const double Now = FPlatformTime::Seconds();
+	// The outfit mesh appears after BeginPlay; keep it on the body's pose (seated legs, idle arms)
+	if (Patient.IsValid() && Now >= NextOutfitCheck)
+	{
+		NextOutfitCheck = Now + 0.5;
+		TInlineComponentArray<USkeletalMeshComponent*> Meshes(Patient.Get());
+		USkeletalMeshComponent* const* Body = Meshes.FindByPredicate([](const USkeletalMeshComponent* Mesh) { return Mesh->GetName() == TEXT("Body"); });
+		static bool bListed = false;
+		if (!bListed && FParse::Param(FCommandLine::Get(), TEXT("VIPDumpScene")))
+		{
+			bListed = true;
+			TInlineComponentArray<USkinnedMeshComponent*> Skinned(Patient.Get());
+			for (const USkinnedMeshComponent* Mesh : Skinned)
+			{
+				UE_LOG(LogVIP, Display, TEXT("VIP skinned: %s class %s asset %s bones %d leader %s attach %s"), *Mesh->GetName(), *Mesh->GetClass()->GetName(),
+					Mesh->GetSkinnedAsset() ? *Mesh->GetSkinnedAsset()->GetName() : TEXT("none"), Mesh->GetNumBones(),
+					Mesh->LeaderPoseComponent.IsValid() ? *Mesh->LeaderPoseComponent->GetName() : TEXT("none"),
+					Mesh->GetAttachParent() ? *Mesh->GetAttachParent()->GetName() : TEXT("none"));
+			}
+		}
+		for (USkeletalMeshComponent* Mesh : Meshes)
+		{
+			if (Body && Mesh != *Body && Mesh->GetName() != TEXT("Face") && Mesh->GetNumBones() > 0
+				&& Mesh->LeaderPoseComponent.Get() != *Body)
+			{
+				Mesh->SetLeaderPoseComponent(*Body);
+				UE_LOG(LogVIP, Display, TEXT("%s follows the body pose"), *Mesh->GetName());
+			}
+		}
+	}
 	if (Voice && DelayedSound.Num() > 0 && Now >= PlaySoundAt)
 	{
 		Voice->QueueAudio(reinterpret_cast<const uint8*>(DelayedSound.GetData()), DelayedSound.Num() * sizeof(int16));

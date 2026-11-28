@@ -1,5 +1,7 @@
 #include "VIPPatients.h"
 
+#include "VIPBody.h"
+
 #include "Components/SkeletalMeshComponent.h"
 #include "EngineUtils.h"
 
@@ -34,18 +36,39 @@ namespace
 		return Result;
 	}
 
-	bool HeadLocation(const AActor& Patient, FVector& Out)
+	bool BoneLocation(const AActor& Patient, const FName& Bone, FVector& Out)
 	{
 		TInlineComponentArray<USkeletalMeshComponent*> Meshes(&Patient);
 		for (const USkeletalMeshComponent* Mesh : Meshes)
 		{
-			if (Mesh->GetBoneIndex(HeadBone) != INDEX_NONE)
+			if (Mesh->GetBoneIndex(Bone) != INDEX_NONE)
 			{
-				Out = Mesh->GetBoneLocation(HeadBone);
+				Out = Mesh->GetBoneLocation(Bone);
 				return true;
 			}
 		}
 		return false;
+	}
+
+	bool HeadLocation(const AActor& Patient, FVector& Out)
+	{
+		return BoneLocation(Patient, HeadBone, Out);
+	}
+
+	/** Seated: lower the whole patient so the hip joints sit at the chair's height (legs bend in VIPBody). */
+	void Seat(AActor& Patient)
+	{
+		FVector Hip;
+		if (!VIPBody::IsSeated() || !BoneLocation(Patient, TEXT("thigh_l"), Hip))
+		{
+			return;
+		}
+		const float Drop = VIPPatients::SeatHipHeight - Hip.Z;
+		if (FMath::Abs(Drop) > 0.5f)
+		{
+			Patient.AddActorWorldOffset(FVector(0, 0, Drop));
+			UE_LOG(LogVIPPatients, Display, TEXT("Seated: patient moved %.1f cm"), Drop);
+		}
 	}
 }
 
@@ -103,6 +126,10 @@ AActor* VIPPatients::Choose(UWorld& World, const FString& Gender, int32 Age, int
 		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 		Patient = World.SpawnActor<AActor>(Class, Where, Params);
 		Patient->Tags.Add(PatientTag);
+	}
+	if (Patient)
+	{
+		Seat(*Patient);
 	}
 	UE_LOG(LogVIPPatients, Display, TEXT("Patient %s (%s, %s, %d, %s) for gender '%s' age %d character '%s'"),
 		*BestName.ToString(), *Best->Preset, *Best->Gender, Best->Age, *Best->Character, *Gender, Age, *Character);

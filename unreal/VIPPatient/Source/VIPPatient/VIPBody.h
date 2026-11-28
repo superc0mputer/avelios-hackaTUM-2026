@@ -2,9 +2,23 @@
 
 #include "CoreMinimal.h"
 #include "Animation/AnimInstance.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
 #include "VIPBody.generated.h"
 
 class UAnimSequence;
+
+namespace VIPBody
+{
+	/**
+	 * The seated pose on top of the idle: "bone:axis:degrees" in each bone's local space (axes found
+	 * with -VIPPose and side views, -VIPTurn=90): local Z bends hip and knee on both sides.
+	 */
+	inline const TCHAR* SeatPose = TEXT("thigh_l:z:90,thigh_r:z:90,calf_l:z:-90,calf_r:z:-90");
+
+	/** -VIPStand keeps the old standing patient. */
+	inline bool IsSeated() { return !FParse::Param(FCommandLine::Get(), TEXT("VIPStand")); }
+}
 
 /**
  * Body animation without an Animation Blueprint: plays an idle loop and adds breathing on top, at
