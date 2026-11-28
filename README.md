@@ -54,7 +54,7 @@ These two formats let all four of us work in parallel. The values are examples.
 }
 ```
 
-Voice and face share one `emotion` field. The proposed values are MetaHuman's moods: `neutral`, `happy`, `sad`, `fear`, `disgust`, `anger`, `surprise`. Unknown values fall back to `neutral`. The 0 to 1 scale for `intensity` is a suggestion.
+Voice and face share one `emotion` field. The values are MetaHuman's moods: `neutral`, `happy`, `sad`, `fear`, `disgust`, `anger`, `surprise`, `boredom`, `confidence`, `confusion`, `excitement`, `playfulness`. Unknown values fall back to `neutral`. The 0 to 1 scale for `intensity` is a suggestion.
 
 ## Who hands what to whom
 
