@@ -90,13 +90,52 @@ Voice and face share one `emotion` field. The proposed values are MetaHuman's mo
 git clone https://github.com/superc0mputer/avelios-hackaTUM-2026.git
 ```
 
-There is no code yet, so setup instructions get added here as each part lands.
+So far only the Unreal patient can be run (see below). Other setup instructions get added as each part lands.
 
 - **OpenAI key:** Avelios offers a key with capped usage. Message them on Discord with team name, all members and one contact person with contact details.
 - **ElevenLabs key:** check the free limits on elevenlabs.io (#16).
 - **Keys** go in a local `.env` file that is never committed.
-- **Unreal:** version 5.6 or later with the MetaHuman plugins (#21).
+- **Unreal:** version 5.8 (see below).
 - **Questions:** the Avelios mentors are on site all weekend.
+
+## Run the Unreal patient
+
+The repository holds only our project file, config and build scripts. The MetaHuman is **rebuilt on your machine** from an Epic preset, so no Epic assets are published.
+
+**You need**
+- macOS (tested on an M4 MacBook Air with 16 GB) or Windows (**not tested yet**). Linux is not supported.
+- Unreal Engine 5.8 with **MetaHuman Creator Core Data** (Epic Games Launcher → 5.8 → Options)
+- An Epic account signed in through the launcher, and internet: textures and rig come from Epic's online services
+- About 2 GB of free disk space, and a short repository path without spaces
+
+macOS:
+
+```bash
+unreal/build.sh --run
+```
+
+Windows (PowerShell, from the repository folder; the policy flag applies to this run only):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File unreal\build.ps1 -Run
+```
+
+The first build takes around 10 minutes on the Mac we tested. Later runs skip what is already built. Options on macOS:
+
+- `unreal/build.sh` builds without opening the window
+- `unreal/build.sh --clean` rebuilds from scratch
+- `VIP_PRESET=Bruce unreal/build.sh --clean` uses a different Epic preset
+- `UE_ROOT=/path/to/UE_5.8 unreal/build.sh` if Unreal is installed elsewhere
+
+On Windows use `-Clean` and `-Run`, and set `$env:VIP_PRESET` or `$env:UE_ROOT` first if needed. Clone to a short path without spaces, such as `C:\dev`.
+
+Logs are in `unreal/VIPPatient/Saved/BuildLogs/`. To edit the scene, open `unreal/VIPPatient/VIPPatient.uproject` after building.
+
+**Rules for this public repository**
+- Never commit anything from `Content/MetaHumans/` or `Content/Patient/` (already ignored).
+- Changes made by hand to those generated assets are lost on `--clean`. Put them into the scripts in `unreal/VIPPatient/Scripts/`.
+
+**Current state:** a standing patient with camera and lights. Facial animation is untested (#22) and there is no room yet.
 
 ## Technical notes (from the docs, not yet tested by us)
 

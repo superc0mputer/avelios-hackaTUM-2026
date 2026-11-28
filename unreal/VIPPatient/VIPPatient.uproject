@@ -1,0 +1,11 @@
+{
+  "FileVersion": 3,
+  "EngineAssociation": "5.8",
+  "Plugins": [
+    { "Name": "MetaHumanCharacter", "Enabled": true },
+    { "Name": "MetaHumanLiveLink", "Enabled": true },
+    { "Name": "PythonScriptPlugin", "Enabled": true },
+    { "Name": "EditorScriptingUtilities", "Enabled": true },
+    { "Name": "AndroidFileServer", "Enabled": false }
+  ]
+}
