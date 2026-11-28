@@ -18,9 +18,10 @@ DEFINE_LOG_CATEGORY_STATIC(LogVIPVideo, Log, All);
 
 namespace
 {
-	// Defaults: the window's own size (1280x720 from build.sh), JPEG quality 80, 15 fps: about
-	// 60-90 KB per frame, ~1 MB/s per viewer. Change with -VIPVideoWidth=, -VIPVideoQuality=,
-	// -VIPVideoFps= (height follows the window's aspect ratio).
+	// Defaults: 960 wide (540 for the 1280x720 window), JPEG quality 80, 15 fps: about 25 KB per
+	// frame. A free Cloudflare tunnel carries about 2 Mbit/s per video stream, so this gives ~10 fps
+	// to testers on the public link (sharper 1280-wide frames drop to ~5 fps). Change with
+	// -VIPVideoWidth=, -VIPVideoQuality=, -VIPVideoFps= (height follows the window's aspect ratio).
 	int32 OptionOr(const TCHAR* Name, int32 Default)
 	{
 		int32 Value = Default;
@@ -120,7 +121,7 @@ void UVIPVideoStream::StartCapture()
 		return;
 	}
 	const FIntPoint GrabSize = WindowSize;
-	const int32 Width = FMath::Clamp(OptionOr(TEXT("VIPVideoWidth="), WindowSize.X), 160, WindowSize.X);
+	const int32 Width = FMath::Clamp(OptionOr(TEXT("VIPVideoWidth="), 960), 160, WindowSize.X);
 	FrameSize = FIntPoint(Width, FMath::Max(90, Width * WindowSize.Y / WindowSize.X) & ~1);
 	JpegQuality = FMath::Clamp(OptionOr(TEXT("VIPVideoQuality="), 80), 30, 95);
 	FramesPerSecond = FMath::Clamp(OptionOr(TEXT("VIPVideoFps="), 15), 2, 30);
