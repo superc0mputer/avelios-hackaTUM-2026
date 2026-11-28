@@ -23,6 +23,9 @@ public class VIPPatient : ModuleRules
 			// Keep the mouse free in the patient window (VIPWindow)
 			"Slate",
 			"SlateCore",
+			// Live patient video for remote testers (VIPVideoStream)
+			"MovieSceneCapture",
+			"ImageWrapper",
 		});
 	}
 }
