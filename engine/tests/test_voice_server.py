@@ -116,3 +116,29 @@ def test_load_teacher_case_and_list(monkeypatch):
     assert client.post("/case", json={"case_id": "nope"}).status_code == 404
     # Loading cases is local only, never through the public tunnel.
     assert client.post("/case", json={"case_id": "case-001"}, headers={"cf-ray": "x"}).status_code == 403
+
+
+def test_stage_relays_audio_and_emotion_to_unreal():
+    client, _ = make_client()
+    with client.websocket_connect("/ws/unreal") as unreal:
+        assert json.loads(unreal.receive_text()) == {"type": "emotion", "emotion": "neutral", "intensity": 0.6}
+        with client.websocket_connect("/ws/stage") as stage:
+            assert json.loads(stage.receive_text()) == {"type": "status", "unreal": 1}
+            stage.send_text(json.dumps({"type": "audio", "sample_rate": 16000, "pcm_b64": "AAABAA=="}))
+            assert json.loads(unreal.receive_text()) == {"type": "audio", "sample_rate": 16000, "pcm_b64": "AAABAA=="}
+            stage.send_text(json.dumps({"type": "emotion", "emotion": "furious", "intensity": 3}))
+            assert json.loads(unreal.receive_text()) == {"type": "emotion", "emotion": "neutral", "intensity": 1.0}
+        # Loading a teacher case sends its mood (case-001: neutral; set a different one inline).
+        case = json.loads((ENGINE_DIR.parent / "cases" / "case-001.json").read_text(encoding="utf-8"))
+        case["personality"]["mood"] = "sad"
+        assert client.post("/case", json={"case": case}).json()["mood"] == "sad"
+        assert json.loads(unreal.receive_text())["emotion"] == "sad"
+
+
+def test_websockets_closed_through_tunnel():
+    from starlette.websockets import WebSocketDisconnect
+
+    client, _ = make_client()
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect("/ws/unreal", headers={"cf-ray": "x"}) as ws:
+            ws.receive_text()

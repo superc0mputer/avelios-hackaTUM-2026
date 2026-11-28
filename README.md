@@ -96,9 +96,25 @@ cp .env.example .env    # add OPENAI_API_KEY; optional ENGINE_API_KEY, PATIENT_C
 cloudflared tunnel --url http://127.0.0.1:8787   # ElevenLabs needs a public HTTPS URL
 ```
 
-To interview a case made in the teacher UI, run the teacher UI next to it (`cd teacher-ui && python server.py`, `TEACHER_UI_HOST=0.0.0.0` to reach it from another machine), save a case and click **Start conversation**. It loads the case into the voice server (`POST /case`, local only) and opens the ElevenLabs conversation (set `ELEVENLABS_AGENT_ID` in `engine/.env`). Teacher-UI cases are translated to the engine's `PatientConfig` by `engine/case_adapter.py`: first symptom = told freely, other facts = only when asked, secrets = gated; the diagnosis never reaches the patient.
+To interview a case made in the teacher UI, run the teacher UI next to it (`cd teacher-ui && python server.py`, `TEACHER_UI_HOST=0.0.0.0` to reach it from another machine), save a case and click **Start conversation**. It loads the case into the voice server (`POST /case`, local only) and opens a **live interview panel on the same page** (ElevenLabs browser SDK, live transcript; set `ELEVENLABS_AGENT_ID` in `engine/.env`). The microphone only works over **HTTPS** or on `localhost`: serve the teacher UI over HTTPS (e.g. `tailscale serve --https=8446 8765`) and map `/ws` to the voice server on the same host (`tailscale serve --https=8446 --set-path /ws http://127.0.0.1:8787/ws`), so the page can relay the patient's voice to Unreal. Teacher-UI cases are translated to the engine's `PatientConfig` by `engine/case_adapter.py`: first symptom = told freely, other facts = only when asked, secrets = gated; the diagnosis never reaches the patient.
 
 In the ElevenLabs agent: LLM = **Custom LLM**, server URL = `https://<tunnel-host>/v1`, API key = the same value as `ENGINE_API_KEY` (stored as a secret). Leave the agent's own prompt short and the first message empty; the patient waits for the student. Through the tunnel only `/v1/chat/completions`, `/v1/models` and `/health` are reachable. Tests: `.venv/bin/python -m pytest -q tests`.
+
+### Connect the MetaHuman
+
+The patient's voice and emotion reach Unreal through the voice server:
+
+```
+teacher page (ElevenLabs SDK) --audio--> voice server /ws/stage --audio + emotion--> /ws/unreal <-- Unreal (VIPBackendLink)
+```
+
+- Start the voice server on an address Unreal can reach (`--host 0.0.0.0`; `/ws/*` is refused through the public tunnel).
+- Start Unreal with `VIP_SERVER=ws://<voice-server-host>:8787/ws/unreal unreal/build.sh --run`, or pass `-VIPServer=ws://...` to the editor or the packaged app.
+- Messages to Unreal, as JSON text:
+  - `{"type":"audio","sample_rate":16000,"pcm_b64":...}`: the patient's voice as mono 16-bit PCM → `UVIPSpeechSubsystem::Speak`;
+  - `{"type":"emotion","emotion":"sad","intensity":0.6}` → `SetEmotion` (the case's starting mood for now);
+  - `{"type":"interrupt"}`: the student talked over the patient (logged only for now).
+- While an Unreal client is connected, the teacher page mutes its own playback, so the patient speaks only through the MetaHuman.
 
 ## Run the Unreal patient
 
