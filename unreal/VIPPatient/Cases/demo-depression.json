@@ -1,0 +1,22 @@
+{
+  "_comment": "Demo case for the Unreal look only (#45): patient, mood, personality and the proposed 'presentation' field. Not a full teacher case.",
+  "case_id": "demo-depression",
+  "character_id": "woman-03",
+  "diagnosis": "Depressive episode (demo)",
+  "patient": {
+    "age": 28,
+    "gender": "female"
+  },
+  "personality": {
+    "type": "shy_reserved",
+    "mood": "sad"
+  },
+  "presentation": {
+    "pain": 0,
+    "breathing": "normal",
+    "discomfort": 0.4,
+    "visible_signs": [
+      "tired"
+    ]
+  }
+}

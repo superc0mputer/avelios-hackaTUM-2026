@@ -109,7 +109,7 @@ teacher page (ElevenLabs SDK) --audio--> voice server /ws/stage --audio + emotio
 ```
 
 - Start the voice server on an address Unreal can reach (`--host 0.0.0.0`; `/ws/*` is refused through the public tunnel).
-- Start Unreal with `VIP_SERVER=ws://<voice-server-host>:8787/ws/unreal unreal/build.sh --run`, or pass `-VIPServer=ws://...` to the editor or the packaged app.
+- Start Unreal with `VIP_SERVER=ws://<voice-server-ip>:8787/ws/unreal unreal/build.sh --run`, or pass `-VIPServer=ws://...` to the editor or the packaged app. Use an IPv4 address (e.g. `127.0.0.1` or the host's Tailscale IP), not `localhost` or a hostname: the voice server listens on IPv4 only, and macOS may try IPv6 first.
 - Messages to Unreal, as JSON text:
   - `{"type":"audio","sample_rate":16000,"pcm_b64":...}`: the patient's voice as mono 16-bit PCM → `UVIPSpeechSubsystem::Speak`;
   - `{"type":"emotion","emotion":"sad","intensity":0.6}` → `SetEmotion` (the case's starting mood for now);
@@ -121,9 +121,10 @@ teacher page (ElevenLabs SDK) --audio--> voice server /ws/stage --audio + emotio
 The repository holds only our project file, config, C++ module and build scripts. The MetaHuman is **rebuilt on your machine** from an Epic preset, so no Epic assets are published.
 
 **You need**
-- macOS (tested on an M4 MacBook Air with 16 GB, Xcode 26.6) or Windows (**not tested yet**; needs Visual Studio 2022 with "Game development with C++"). Linux is not supported.
+- macOS (tested on an M4 MacBook Air with 16 GB, Xcode 26.6, and an M2 Pro MacBook Pro with 16 GB, Xcode 27) or Windows (**not tested yet**; needs Visual Studio 2022 with "Game development with C++"). Linux is not supported.
 - Unreal Engine 5.8 with **MetaHuman Creator Core Data** (Epic Games Launcher → 5.8 → Options)
 - An Epic account signed in through the launcher, and internet: textures and rig come from Epic's online services
+- On Xcode 26 or later, the Metal toolchain (Unreal compiles its shaders with it; without it the first build stops with "missing Metal Toolchain"): `xcodebuild -downloadComponent MetalToolchain`
 - About 5 GB of free disk space (more for packaging), and a short repository path without spaces
 
 macOS:
@@ -138,7 +139,7 @@ Windows (PowerShell, from the repository folder; the policy flag applies to this
 powershell -ExecutionPolicy Bypass -File unreal\build.ps1 -Run
 ```
 
-The first build takes around 10 minutes per patient on the Mac we tested. Later runs skip what is already built. Options on macOS:
+The first build takes around 10 minutes per patient on the Mac we tested (about 15 on a second Mac, with Unreal on a USB drive). During the first step Epic may ask you to sign in; the build waits for it. Building the MetaHuman briefly needs more than 16 GB of memory, so close other heavy apps. Later runs skip what is already built. Options on macOS:
 
 - `unreal/build.sh` builds without opening the window
 - `unreal/build.sh --clean` rebuilds from scratch
@@ -158,6 +159,14 @@ unreal/package.sh
 
 On Windows: `powershell -ExecutionPolicy Bypass -File unreal\package.ps1` (not tested yet). The app lands in `unreal/VIPPatient/Saved/Package/` and is about 2 GB. It contains Epic assets, so **never commit or publish it**; share it privately. The Mac app is not signed with a developer account yet, so another Mac will ask for permission the first time it opens.
 
+### Demo view (#26)
+
+- Full screen: start the packaged app with `-fullscreen` (standard Unreal flag). Not verified yet: in a test with the Mac's screen locked, the app hung while creating the window (macOS cannot switch to a full-screen Space on a locked screen), while `-windowed` worked. Try it once with the screen unlocked; fallback: `-windowed -resx=<screen width> -resy=<screen height>`.
+- Delay Unreal adds: speech is held back 0.12 s so lips and voice line up (`SoundDelaySeconds`). Measured in the game window on an M4 MacBook Air (10 sentences, `-VIPWav=` runs log `VIP latency:` lines): the jaw opens 74 to 96 ms after `Speak()`, the sound is queued about 120 ms after it, so the mouth leads the sound by 25 to 46 ms plus the audio device's own latency. Viewers tolerate sound slightly after the lips much better than before them. The voice reaches the speakers about 0.13 s later than without Unreal; network and text-to-speech time come on top.
+- Keep the demo machine otherwise idle: with a background process using a full core and a hot machine, the jaw opened 200 to 580 ms after `Speak()`, so the lips trailed the voice by up to 0.45 s.
+- If Unreal fails: the teacher page plays the patient's voice itself whenever no Unreal client is connected to the voice server (#49), so the conversation goes on voice-only.
+- Checked tonight: the packaged app (2.4 GB) loads a case, swaps the patient, plays the body idle and shows signs, breathing, emotions and pain.
+
 ### Patients
 
 The app has six patients, built from Epic presets listed in `unreal/VIPPatient/Scripts/patients.json`. Ages are estimated from how the faces look:
@@ -171,7 +180,7 @@ The app has six patients, built from Epic presets listed in `unreal/VIPPatient/S
 | Bruce | male | 50 |
 | Walter | male | 72 (default) |
 
-The app shows the patient closest to the case: gender first, then age. For now this comes from the command line, for example `-VIPGender=female -VIPAge=25` (from the case JSON later, #24). The camera and face lights follow the patient's head height.
+The app shows the patient closest to the case: gender first, then age. For now this comes from the command line, for example `-VIPGender=female -VIPAge=25` (from the case JSON later, #24). The camera and face lights follow the patient's head position.
 
 To add a patient, add a line to `patients.json` with an Epic preset name (see `Engine/Plugins/MetaHuman/MetaHumanCharacter/Content/Optional/Presets` in the Unreal folder) and run the build again. Each patient adds about 10 minutes of build time and about 0.5 GB to the app.
 
@@ -182,7 +191,10 @@ When a case is loaded (from the voice server, or `-VIPCase=cases/case-001.json`)
 - **Who:** the case's `character_id` (`man-01` Bruce, `man-02` Walter, `man-03` Trey, `woman-01` Lani, `woman-02` Grace, `woman-03` Sunita, set in `patients.json`) if that patient's age is within 15 years of `patient.age`; otherwise the closest age of the same gender. A 58-year-old never gets a 25-year-old face.
 - **Starting mood:** `personality.mood`.
 - **Personality in body language:** `personality.type`: anxious_talkative blinks and looks around more and moves more, shy_reserved never fully holds eye contact, assertive holds a steady gaze, distrustful glances away with a slightly narrowed look and does not nod.
+- **Visible signs** (#34, `presentation.visible_signs`): `pale`, `jaundice` (yellow skin and sclera), `cyanosis` (dusky bluish-grey skin; the skin material has no separate lip colour), `flushed`, `sweaty` (glossier skin), `red_eyes`, `tired`. `VIPSigns.cpp` changes the MetaHuman's own skin and eye material parameters at runtime, so no rebuild is needed. `-VIPSigns=pale,sweaty`; shot step `signs=pale+sweaty`. `-VIPDumpControls` also lists every material parameter.
 - **Optional `presentation`** (proposed addition to the case schema): `{"pain": 0-10, "breathing": "normal|fast_shallow|laboured|slow_deep|<rate>", "discomfort": 0-1, "visible_signs": [...]}`. Pain and discomfort from the case are the floor: turns can raise them, not drop below.
+
+Demo cases for the look: `unreal/VIPPatient/Cases/demo-*.json` (chest pain, COPD, depression, liver disease), e.g. `-VIPCase=unreal/VIPPatient/Cases/demo-copd.json`.
 
 Test without the backend: `python3 unreal/VIPPatient/Scripts/fake_voice_server.py --wav reply.wav --case cases/case-001.json --pain 5 --breathing fast_shallow`, then start the game with `-VIPServer=ws://127.0.0.1:8787/ws/unreal` (use the IP: `localhost` failed to connect on macOS). It sends the case, then three turns with thinking, emotion and streamed audio, and interrupts the second one.
 
@@ -199,7 +211,7 @@ Test without the backend: `python3 unreal/VIPPatient/Scripts/fake_voice_server.p
 - `UVIPSpeechSubsystem::SetPain(level)` (#35): pain 0 to 10 from the case or the turn. There is no pain mood in MetaHuman, so the face is built from the Prkachin-Solomon pain action units (lowered brows, tightened eyes, wrinkled nose and raised upper lip, partly closed eyes). The face grows with the level, and from pain 3 the patient winces now and then. `-VIPPain=7`; shot steps `pain=6` and `wince`.
 - `UVIPSpeechSubsystem::SetBreathing(pattern)` (#36): `normal` (14/min), `fast_shallow` (28/min), `laboured` (24/min, deep, with the shoulders), `slow_deep` (9/min), or a rate such as `22`; or `SetBreathing(rate, depth, shoulders)`. `VIPBody.cpp` plays the idle loop and lifts the shoulders with each breath (quicker in, short pause, slower out); changes ease in over a few seconds. Only the shoulders move: bending the spine opens a gap between collar and neck. `-VIPBreathing=fast_shallow`; shot step `breathing=laboured`; `-VIPBreathHold=0|1` freezes the breath for comparing screenshots.
 - `UVIPSpeechSubsystem::SetDiscomfort(0-1)` (#38): on sensitive topics the patient looks down and to the side, blinks more, stops nodding, and the inner brows rise a little; it eases back over a few seconds when discomfort drops. `-VIPDiscomfort=0.8`; shot step `discomfort=1`.
-- **Head motion is kept small on purpose.** The head turn comes from the face rig, but the shirt follows the body, whose neck the face does not copy here (the copy-pose step in Epic's Live Link face anim seems inactive). A few degrees of pitch, or turning toward one side, pull the neck through the collar. So head offsets are clamped (yaw -1.2 to 6, pitch and roll about 1 degree), looking away always goes to the safe side (`-VIPSide=-1` to compare), and the idle keeps pelvis, spine and neck still. The eyes do most of the looking.
+- **Head motion is kept small on purpose.** The head turn comes from the face rig, but the shirt follows the body, whose neck the face does not copy here (the copy-pose step in Epic's Live Link face anim seems inactive). A few degrees of pitch, or turning toward one side, pull the neck through the collar. So head offsets are clamped (yaw -1.2 to 6, pitch and roll about 1 degree), looking away always goes to the safe side (`-VIPSide=-1` to compare), and the body keeps pelvis, spine, neck and head at the rest pose the face is modelled for (only arms and shoulders follow the idle). The eyes do most of the looking.
 - `UVIPSpeechSubsystem::SetAttention(state)` (#37): `listening` (eye contact, a small nod now and then), `thinking` (eyes up and to one side, head following a little, for the wait while the answer is generated) or `idle`. While speech plays the patient glances away more, as people do while talking. `StopSpeaking()` cuts the speech off when the student interrupts. In `-VIPShots`, the steps `listening`, `thinking` and `stop` do the same.
 
 Try it with any 16-bit WAV file (for example one made with `say -o test.wav --data-format=LEI16@24000 "Hello doctor"` on macOS):

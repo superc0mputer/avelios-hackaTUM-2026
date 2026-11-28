@@ -18,7 +18,8 @@ class USoundWaveProcedural;
 /**
  * Makes the patient speak: plays 16-bit PCM speech and animates the face from the same samples.
  *
- * For testing: -VIPWav=<16-bit WAV> says the file every few seconds and logs face values once a
+ * For testing: -VIPWav=<16-bit WAV> says the file every few seconds, logs the delay from Speak() to
+ * the first open jaw ("VIP latency:") and logs face values once a
  * second; -VIPMood=<emotion> sets the mood and -VIPIntensity=<0 to 2> its strength;
  * -VIPMoods=neutral,sad,neutral,anger steps through moods every -VIPMoodSeconds (default 4);
  * -VIPGender=female -VIPAge=25 picks the patient.
@@ -101,6 +102,7 @@ private:
 	void UpdateLife();
 	void ApplySolverMood();
 	void LogFace(float DeltaTime);
+	void ProbeLatency(double Now);
 	void ApplyTestStep(const FString& Step);
 	void RunShots(double Now);
 
@@ -148,6 +150,7 @@ private:
 	float AvoidSide = 1;
 
 	FVIPPersonalityStyle Style;
+	TWeakObjectPtr<AActor> Patient;
 	float CasePain = 0;
 	float CaseDiscomfort = 0;
 
@@ -176,4 +179,10 @@ private:
 
 	bool bLogFace = false;
 	float LogTimer = 0;
+
+	// Delay probe for test runs: time from Speak() to the first open jaw
+	double LatencySpeakAt = 0;
+	double LatencyVoiceOffset = 0;
+	bool bLatencyPending = false;
+	bool bLatencySoundPending = false;
 };
