@@ -32,7 +32,7 @@
       "required": ["type", "description", "mood"],
       "properties": {
         "type": {
-          "enum": ["downplays_everything", "anxious_talkative", "shy_reserved", "assertive", "distrustful", "custom"]
+          "enum": ["no_preference", "downplays_everything", "anxious_talkative", "shy_reserved", "assertive", "distrustful", "custom"]
         },
         "description": { "type": "string" },
         "mood": { "enum": ["neutral", "happy", "sad", "fear", "disgust", "anger", "surprise"] }

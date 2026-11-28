@@ -42,3 +42,15 @@ def test_teacher_case_maps_to_patient_config(path):
 def test_engine_format_still_loads():
     config = load_patient_config(ENGINE_DIR / "data" / "mock_gerhard_mueller.json")
     assert config.case_id == "gerhard_mueller_acs_01"
+
+
+def test_no_preference_personality():
+    from jsonschema import Draft202012Validator
+
+    case = json.loads((CASES_DIR / "case-001.json").read_text(encoding="utf-8"))
+    case["personality"] = {"type": "no_preference", "description": "", "mood": "neutral"}
+    schema = json.loads((CASES_DIR / "patient-case.schema.json").read_text(encoding="utf-8"))
+    assert not list(Draft202012Validator(schema).iter_errors(case))
+    config = load_patient_config(case)
+    assert "ordinary" in config.affect_profile.communication_style
+    assert config.affect_profile.cooperation_level == "high"

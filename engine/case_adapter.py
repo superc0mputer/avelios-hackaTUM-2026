@@ -25,6 +25,13 @@ DEFAULT_SETTING = "GP practice"
 
 # Same wording as the disclosure hints in teacher-ui/static/app.js.
 PERSONALITIES: dict[str, dict[str, Any]] = {
+    "no_preference": {
+        "style": "an ordinary, cooperative patient; natural everyday words, neither hides things nor over-shares",
+        "cooperation": "high",
+        "unlock": "An ordinary, cooperative patient; shares secrets once the student asks respectfully and specifically.",
+        "triggers": ["being rushed or talked down to", "unexplained medical jargon"],
+        "rapport": ["friendly, respectful questions", "listening and explaining"],
+    },
     "downplays_everything": {
         "style": "short answers at first, plays symptoms down, dry humour, everyday words",
         "cooperation": "moderate",

@@ -1,6 +1,7 @@
 const $ = (selector) => document.querySelector(selector);
 
 const disclosureProfiles = {
+  no_preference: 'An ordinary, cooperative patient; shares secrets once the student asks respectfully and specifically.',
   downplays_everything: 'Minimizes at first; secrets emerge after specific, respectful follow-up.',
   anxious_talkative: 'Volunteers context and may digress; secrets need empathetic, focused follow-up.',
   shy_reserved: 'Gives brief answers at first; opens up with gentle rapport.',
