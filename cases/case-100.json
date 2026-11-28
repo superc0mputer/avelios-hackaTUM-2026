@@ -1,0 +1,90 @@
+{
+  "schema_version": "1.2",
+  "case_id": "case-100",
+  "case_pair_id": "suspected-colorectal-cancer-with-iron-deficiency-anaemia",
+  "character_id": "man-02",
+  "diagnosis": "Suspected colorectal cancer with iron-deficiency anaemia",
+  "patient": {
+    "name": "Heinz Brandt",
+    "age": 71,
+    "gender": "male",
+    "life_story": "Heinz drove trams in Munich for 38 years and retired six years ago. He lives with his wife Gisela in a third-floor flat without a lift. He is polite, a little old-fashioned, and was brought up not to talk about bodily things. Gisela made this appointment because she thinks he has lost weight; he came mostly to keep her happy."
+  },
+  "personality": {
+    "type": "shy_reserved",
+    "description": "Heinz is courteous but embarrassed by anything to do with the toilet. He answers briefly, makes small nervous jokes, and changes the subject when it gets personal. He opens up if the student is calm, explains why they ask, and does not rush him.",
+    "mood": "fear"
+  },
+  "symptoms": [
+    "He has felt unusually tired for about two months, and his wife says he has lost weight, which is why he is here.",
+    "He has lost about six kilograms in three months without trying; his trousers have become loose.",
+    "For about two months his stools have been looser and he goes three or four times a day, often feeling he has not fully emptied his bowels.",
+    "He has crampy discomfort low in his belly, about three out of ten, that eases after he opens his bowels; no vomiting and no fever.",
+    "He has recently become breathless climbing the stairs to the flat, which he could do easily a year ago."
+  ],
+  "medical_history": [
+    "Type 2 diabetes for about ten years, well controlled on tablets.",
+    "High blood pressure for about eight years.",
+    "Left hip replacement five years ago; no operations on his bowel and he has never had a colonoscopy."
+  ],
+  "medications": [
+    "Metformin 1000 mg twice a day.",
+    "Ramipril 5 mg once a day.",
+    "Ibuprofen from the pharmacy a few times a month for his other hip."
+  ],
+  "allergies": [
+    "Penicillin gave him a rash as a young man."
+  ],
+  "family_history": [
+    "His older brother died at 66 of 'something in the belly'; at first he does not say what it was.",
+    "His mother had type 2 diabetes."
+  ],
+  "lifestyle": [
+    "Never smoked; a glass of wine with dinner at the weekend.",
+    "Eats a lot of red meat and sausage; since retiring he walks little apart from going to the bakery.",
+    "Lives with his wife Gisela, who has early memory problems; their daughter lives in Hamburg."
+  ],
+  "secrets": [
+    "For about six weeks he has seen dark red blood mixed in with his stool several times; he is embarrassed and has told no one, not even his wife.",
+    "His brother died of bowel cancer, and he is privately terrified that he has the same thing.",
+    "He threw away the bowel cancer screening kit twice because he found it disgusting.",
+    "He is afraid that if it is serious, nobody will be there to look after Gisela."
+  ],
+  "evaluation_fact_ids": {
+    "symptoms": [
+      "symptoms-001",
+      "symptoms-002",
+      "symptoms-003",
+      "symptoms-004",
+      "symptoms-005"
+    ],
+    "medical_history": [
+      "medical_history-001",
+      "medical_history-002",
+      "medical_history-003"
+    ],
+    "medications": [
+      "medications-001",
+      "medications-002",
+      "medications-003"
+    ],
+    "allergies": [
+      "allergies-001"
+    ],
+    "family_history": [
+      "family_history-001",
+      "family_history-002"
+    ],
+    "lifestyle": [
+      "lifestyle-001",
+      "lifestyle-002",
+      "lifestyle-003"
+    ],
+    "secrets": [
+      "secrets-001",
+      "secrets-002",
+      "secrets-003",
+      "secrets-004"
+    ]
+  }
+}

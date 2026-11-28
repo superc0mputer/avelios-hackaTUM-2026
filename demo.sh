@@ -91,6 +91,7 @@ fi
 
 # --- start everything -------------------------------------------------------------
 pids=""
+servers=""
 cleanup() {
   trap - EXIT INT TERM
   echo
@@ -118,6 +119,7 @@ say "voice server on 127.0.0.1:$VOICE_PORT"
 (cd "$root/engine" && exec "$venv/bin/uvicorn" voice_server:app --host 127.0.0.1 --port "$VOICE_PORT") \
   > "$logs/voice_server.log" 2>&1 &
 pids="$pids $!"
+servers="$servers $!"
 wait_for 30 "the voice server" curl -fs "http://127.0.0.1:$VOICE_PORT/health"
 
 say "teacher page on http://localhost:$PAGE_PORT"
@@ -125,11 +127,13 @@ say "teacher page on http://localhost:$PAGE_PORT"
   VOICE_SERVER_URL="http://127.0.0.1:$VOICE_PORT" exec "$venv/bin/python" server.py) \
   > "$logs/teacher_ui.log" 2>&1 &
 pids="$pids $!"
+servers="$servers $!"
 wait_for 15 "the teacher page" curl -fs "http://127.0.0.1:$PAGE_PORT/"
 
 say "public tunnel for ElevenLabs"
 "$cloudflared" tunnel --no-autoupdate --url "http://127.0.0.1:$VOICE_PORT" > "$logs/tunnel.log" 2>&1 &
 pids="$pids $!"
+servers="$servers $!"
 tunnel_url() { grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' "$logs/tunnel.log" | head -1; }
 has_tunnel_url() { [ -n "$(tunnel_url)" ]; }
 wait_for 30 "the tunnel address" has_tunnel_url
@@ -160,8 +164,7 @@ echo "Ready: $page  (Ctrl+C stops everything)"
 
 # Stay up until Ctrl+C or a server dies. Closing the Unreal window keeps the servers running.
 while true; do
-  for pid in $pids; do
-    [ "$unreal" = 1 ] && [ "$pid" = "$unreal_pid" ] && continue
+  for pid in $servers; do
     kill -0 "$pid" 2>/dev/null || die "a server stopped unexpectedly, see $logs/"
   done
   if [ "$unreal" = 1 ] && [ -n "${unreal_pid:-}" ] && ! kill -0 "$unreal_pid" 2>/dev/null; then
