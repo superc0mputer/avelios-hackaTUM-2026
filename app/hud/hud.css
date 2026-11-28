@@ -1,0 +1,176 @@
+/* The desktop app's look: during the interview the website becomes a see-through layer over the live
+   patient. Loaded after teacher-ui/static/styles.css, only by app/hud/page_server.py (see README.md here).
+   hud.js sets <body data-hud>:
+     "page"  every other screen: the website exactly as it is, no patient. Nothing here styles it.
+     "live"  the interview: the patient full screen, the controls floating over them. */
+
+html.vip-hud {
+  --hud-glass: rgb(246 249 252 / .66);
+  --hud-glass-edge: rgb(255 255 255 / .55);
+  --hud-blur: blur(18px) saturate(150%);
+  --hud-shadow: 0 18px 50px rgb(4 18 30 / .32);
+  --hud-gap: 18px;
+  --hud-notes: clamp(300px, 22vw, 380px);
+}
+html.vip-hud:has(body[data-hud="live"]) { background: #0b1a27; }
+.vip-hud body[data-hud="live"] { min-height: 100vh; background: transparent; }
+.vip-hud .toast { z-index: 60; }
+
+/* ---------- the patient behind the interview ---------- */
+#hud-stage {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  background: radial-gradient(ellipse at 50% 35%, #2b4a63, #0b1a27 70%);
+}
+#hud-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 50% 0;  /* a window wider than the picture cuts off the shirt, never the head */
+  opacity: 0;
+  transition: opacity .6s;
+}
+.hud-patient-ready #hud-stage.has-video #hud-video { opacity: 1; }
+#hud-stage::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(rgb(5 16 26 / .38), transparent 18%, transparent 70%, rgb(5 16 26 / .35));
+}
+#hud-waiting {
+  position: fixed;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 25;
+  margin: 0;
+  padding: 5px 11px;
+  border-radius: 20px;
+  background: rgb(5 16 26 / .6);
+  color: #cfe2ee;
+  font-size: 11px;
+}
+.hud-patient-ready #hud-stage.has-video ~ #hud-waiting,
+body:not([data-hud="live"]) :is(#hud-stage, #hud-waiting, .hud-only) { display: none; }
+
+/* ---------- live mode: the interview as a head-up display ---------- */
+.vip-hud body[data-hud="live"] { overflow: hidden; }
+.vip-hud body[data-hud="live"] .topbar { display: none; }
+.vip-hud body[data-hud="live"] .page-shell,
+.vip-hud body[data-hud="live"] .page-shell:has(#interview-screen:not([hidden])) {
+  width: auto;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+}
+.vip-hud body[data-hud="live"] .interview-screen { padding: 0; }
+.vip-hud body[data-hud="live"] .practice-layout { display: block; }
+/* the website's drawn stand-in for the patient: the real one is behind the page */
+.vip-hud body[data-hud="live"] .patient-stage,
+.vip-hud body[data-hud="live"] .character-tag { display: none; }
+
+.vip-hud body[data-hud="live"] :is(.interview-topline > div, .patient-identity, .student-notes-panel,
+  .conversation-card) {
+  border: 1px solid var(--hud-glass-edge);
+  border-radius: 18px;
+  background: var(--hud-glass);
+  box-shadow: var(--hud-shadow);
+  backdrop-filter: var(--hud-blur);
+  -webkit-backdrop-filter: var(--hud-blur);
+}
+
+/* top: who and how long */
+.vip-hud body[data-hud="live"] .interview-topline {
+  position: fixed;
+  top: var(--hud-gap);
+  right: var(--hud-gap);
+  left: var(--hud-gap);
+  z-index: 10;
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin: 0;
+  pointer-events: none;
+}
+.vip-hud body[data-hud="live"] .interview-topline > div { padding: 10px 16px; pointer-events: auto; }
+.vip-hud body[data-hud="live"] .interview-topline .eyebrow { margin: 0; }
+.vip-hud body[data-hud="live"] .interview-topline h1 { font-size: 19px; }
+.vip-hud body[data-hud="live"] .interview-tools { width: auto; padding: 8px 10px; }
+
+.vip-hud body[data-hud="live"] .patient-identity {
+  position: fixed;
+  top: 100px;
+  left: var(--hud-gap);
+  z-index: 9;
+  margin: 0;
+  padding: 12px 16px;
+}
+
+/* right: notes */
+.vip-hud body[data-hud="live"] .student-notes-panel {
+  position: fixed;
+  top: 100px;
+  right: var(--hud-gap);
+  bottom: var(--hud-gap);
+  z-index: 9;
+  width: var(--hud-notes);
+  overflow: auto;
+  padding: 18px;
+  scrollbar-width: thin;
+}
+.vip-hud body[data-hud="live"].hud-notes-closed .student-notes-panel { display: none; }
+.vip-hud body[data-hud="live"] .student-notes-panel textarea { min-height: 70px; }
+
+/* bottom left: the conversation, next to the patient's face rather than over it */
+.vip-hud body[data-hud="live"] .conversation-card {
+  position: fixed;
+  bottom: var(--hud-gap);
+  left: var(--hud-gap);
+  z-index: 9;
+  width: clamp(320px, 30vw, 540px);
+  max-height: calc(100vh - 210px);
+  overflow: auto;
+  margin: 0;
+  padding: 14px 16px;
+}
+.vip-hud body[data-hud="live"] .conversation-head h3,
+.vip-hud body[data-hud="live"] #conversation-patient,
+.vip-hud body[data-hud="live"] .conversation-link { display: none; }
+.vip-hud body[data-hud="live"] .conversation-head { flex-direction: row; justify-content: flex-end; margin: 0; }
+.vip-hud body[data-hud="live"] .conversation-log {
+  min-height: 0;
+  max-height: 24vh;
+  overflow: auto;
+  margin: 8px 0 10px;
+  border-color: transparent;
+  background: transparent;
+}
+.vip-hud body[data-hud="live"] .bubble { background: rgb(255 255 255 / .8); }
+.vip-hud body[data-hud="live"] .bubble.agent { background: rgb(224 239 249 / .86); }
+.vip-hud body[data-hud="live"] :is(input, textarea) { background: rgb(255 255 255 / .78); }
+
+/* narrow windows: notes and conversation share the width */
+@media (max-width: 900px) {
+  .vip-hud { --hud-notes: 44vw; }
+  .vip-hud body[data-hud="live"] .conversation-card { width: calc(100vw - var(--hud-notes) - 3 * var(--hud-gap)); min-width: 0; }
+  .vip-hud body[data-hud="live"] .interview-topline h1 { display: none; }
+}
+
+/* ---------- API keys (added by hud.js) ---------- */
+#hud-keys {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgb(5 16 26 / .55);
+}
+#hud-keys[hidden] { display: none; }
+#hud-keys .section { width: min(660px, 100%); max-height: 100%; overflow: auto; margin: 0; background: rgb(255 255 255 / .96); }
+#hud-keys .hud-keys-actions { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 10px; }
+#hud-keys small { min-height: 1em; color: var(--muted); font-size: 11px; }
+#hud-keys-note:empty { display: none; }

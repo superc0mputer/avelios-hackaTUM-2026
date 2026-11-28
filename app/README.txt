@@ -8,10 +8,12 @@ START
   1. Unzip this folder anywhere (a short path such as C:\VIP is best).
   2. Double-click "Start VIP Patient.exe".
      Windows may warn that the app is from an unknown publisher: More info > Run anyway.
-  3. The patient window and a page in your browser open. On first start the page asks for
-     your own OpenAI and ElevenLabs API keys (see below). Then pick a patient, click
-     "Start conversation", "Start talking", allow the microphone and greet the patient.
-  Close the black "VIP Patient" window to stop everything.
+  3. The VIP Patient window opens. When an interview starts, the patient fills it and
+     your timer and notes float on top. On first start it asks for your own OpenAI and
+     ElevenLabs API keys (see below).
+     Then choose "I'm a student", enter your name, pick a patient, start the interview, click
+     "Start talking" and greet the patient (the app uses your microphone).
+  Close the window to stop everything. F11 switches to full screen.
 
 YOUR KEYS
   - OpenAI API key: platform.openai.com > API keys. The account needs a little prepaid credit.
@@ -21,16 +23,16 @@ YOUR KEYS
   The keys are stored encrypted on this computer only (for your Windows user) and are sent only
   to OpenAI and ElevenLabs. To make the voice work, the app stores your OpenAI key as a secret in
   your ElevenLabs workspace and creates one agent there named "VIP Patient (local app)". You can
-  delete both in ElevenLabs afterwards; "Forget keys on this computer" on the page removes the
+  delete both in ElevenLabs afterwards; "API KEYS" > "Forget keys" in the app removes the
   local copy.
 
 NEEDS
   Windows 10 or 11 (64-bit), a recent graphics card (the face is rendered in real time),
-  8 GB of memory or more, a microphone (a headset works best) and an internet connection.
+  8 GB of memory or more, the Microsoft Edge WebView2 Runtime (part of Windows 11), a microphone (a headset works best) and an internet connection.
 
 IF SOMETHING GOES WRONG
-  - "port ... already in use": the app is already running; close the other window.
-  - No patient window: the voice still works and plays in the browser.
+  - "port ... already in use": another program uses it; close that program and start again.
+  - "Waiting for the patient..." stays: the patient did not start; the interview still works.
   - Logs: %LOCALAPPDATA%\VIPPatient\logs
 
 This folder contains Unreal Engine and MetaHuman content by Epic Games. It is shared privately

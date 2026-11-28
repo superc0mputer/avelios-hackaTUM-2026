@@ -77,6 +77,9 @@ Copy-Item (Join-Path $repo "teacher-ui\server.py") (Join-Path $app "teacher-ui")
 Copy-Item -Recurse (Join-Path $repo "teacher-ui\static") (Join-Path $app "teacher-ui\static")
 Copy-Item (Join-Path $repo "cases\*.json") (Join-Path $app "cases")
 Copy-Item (Join-Path $PSScriptRoot "launcher.py") $app
+# the app's look: the website on top of the patient
+New-Item -ItemType Directory -Force (Join-Path $app "hud") | Out-Null
+foreach ($file in "page_server.py", "hud.css", "hud.js") { Copy-Item (Join-Path $PSScriptRoot "hud\$file") (Join-Path $app "hud") }
 Get-ChildItem $app -Recurse -Directory -Filter "__pycache__" | Remove-Item -Recurse -Force
 
 # --- the patient window and Microsoft's C++ runtime installer (redistributable)
@@ -93,17 +96,38 @@ if (Test-Path $redist) {
     Write-Host "note: vc_redist.x64.exe not found (set `$env:UE_ROOT); PCs without the C++ runtime will need it"
 }
 
-# --- how to start it: one .exe, built with the C# compiler that comes with Windows
+# --- the app itself: one .exe with its own window, built with the C# compiler that comes with Windows.
+# It shows the page with WebView2 (part of Windows); Microsoft's SDK for it is downloaded once and
+# checked against a fixed checksum.
+$webViewVersion = "1.0.4370.26"
+$webViewHash = "1C0DACAC84B70109B3FD42F90C53A0BA942ABC3A87590D7A4E0CCD86E4A06CF4"
+$webViewZip = Join-Path $cache "microsoft.web.webview2.$webViewVersion.zip"
+if (-not (Test-Path $webViewZip)) {
+    Say "downloading the WebView2 SDK $webViewVersion from nuget.org"
+    Invoke-WebRequest "https://api.nuget.org/v3-flatcontainer/microsoft.web.webview2/$webViewVersion/microsoft.web.webview2.$webViewVersion.nupkg" -OutFile $webViewZip -UseBasicParsing
+}
+if ((Get-FileHash $webViewZip -Algorithm SHA256).Hash -ne $webViewHash) { Fail "unexpected content in $webViewZip; delete it and try again" }
+$webView = Join-Path $cache "webview2-$webViewVersion"
+if (-not (Test-Path $webView)) { Expand-Archive $webViewZip -DestinationPath $webView }
+foreach ($file in "lib\net462\Microsoft.Web.WebView2.Core.dll", "lib\net462\Microsoft.Web.WebView2.WinForms.dll",
+                  "runtimes\win-x64\native\WebView2Loader.dll") {
+    Copy-Item (Join-Path $webView $file) $out
+}
+Copy-Item (Join-Path $webView "LICENSE.txt") (Join-Path $out "WebView2-LICENSE.txt")
+
 Say "building Start VIP Patient.exe"
 $csc = Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 if (-not (Test-Path $csc)) { Fail "C# compiler not found at $csc (.NET Framework 4 is part of Windows 10 and 11)" }
-# Same icon as the patient window
+# Same icon as the patient
 Add-Type -AssemblyName System.Drawing
 $icon = Join-Path $cache "VIPPatient.ico"
 $iconStream = [System.IO.File]::Create($icon)
 [System.Drawing.Icon]::ExtractAssociatedIcon((Join-Path $out "Patient\VIPPatient.exe")).Save($iconStream)
 $iconStream.Close()
-& $csc /nologo /optimize /target:exe "/win32icon:$icon" "/out:$(Join-Path $out 'Start VIP Patient.exe')" `
+& $csc /nologo /optimize /target:winexe /platform:x64 "/win32icon:$icon" `
+    "/win32manifest:$(Join-Path $PSScriptRoot 'StartVIPPatient.manifest')" "/out:$(Join-Path $out 'Start VIP Patient.exe')" `
+    /r:System.Windows.Forms.dll /r:System.Drawing.dll `
+    "/r:$(Join-Path $out 'Microsoft.Web.WebView2.Core.dll')" "/r:$(Join-Path $out 'Microsoft.Web.WebView2.WinForms.dll')" `
     (Join-Path $PSScriptRoot "StartVIPPatient.cs")
 if ($LASTEXITCODE) { Fail "building Start VIP Patient.exe failed" }
 Copy-Item (Join-Path $PSScriptRoot "README.txt") $out
