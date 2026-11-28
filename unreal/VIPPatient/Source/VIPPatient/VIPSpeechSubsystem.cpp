@@ -1,5 +1,6 @@
 #include "VIPSpeechSubsystem.h"
 
+#include "VIPExpressions.h"
 #include "VIPPatients.h"
 #include "VIPSpeechSource.h"
 
@@ -17,7 +18,9 @@
 #include "Misc/CommandLine.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Parse.h"
+#include "Misc/Paths.h"
 #include "Sound/SoundWaveProcedural.h"
+#include "UnrealClient.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogVIP, Log, All);
 
@@ -31,6 +34,22 @@ namespace
 
 	// Solver look-ahead plus processing
 	constexpr double SoundDelaySeconds = 0.12;
+
+	// Emotion blending. Time constants: about 63 % of the way after this many seconds.
+	constexpr float CrossfadeSeconds = 0.4f;   // from one emotion to the next
+	constexpr float RiseSeconds = 0.3f;        // strength going up
+	constexpr float FallSeconds = 1.5f;        // strength easing down to rest
+	constexpr double HoldSeconds = 4.0;        // full strength after the mood is set or speech ends
+	constexpr float RestFraction = 0.5f;       // resting strength between turns
+	constexpr float MaxIntensity = 2.0f;
+	constexpr float SolverRampPerSecond = 2.5f; // the solver has one mood: fade it out, switch, fade in
+	constexpr float RestInSeconds = 0.5f;       // mouth closing after speech
+	constexpr float RestOutSeconds = 0.04f;     // solver back in charge when speech starts
+
+	float Approach(float Current, float Target, float DeltaTime, float TimeConstant)
+	{
+		return Target + (Current - Target) * FMath::Exp(-DeltaTime / TimeConstant);
+	}
 
 	bool LoadWav(const FString& Path, TArray<int16>& OutSamples, int32& OutRate)
 	{
@@ -98,6 +117,7 @@ void UVIPSpeechSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 		bLogFace = true;
 	}
 
+	Expressions = MakeShared<FVIPExpressionLayer>();
 	StartSource(VoiceSampleRate);
 
 	// Which patient: from the case later (#24); for now from the command line
@@ -110,8 +130,69 @@ void UVIPSpeechSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	DriveFace();
 
 	FString Emotion = TEXT("neutral");
+	float Intensity = 1.0f;
+	FString Moods;
 	FParse::Value(FCommandLine::Get(), TEXT("VIPMood="), Emotion);
-	SetEmotion(Emotion, 1.0f);
+	FParse::Value(FCommandLine::Get(), TEXT("VIPIntensity="), Intensity);
+	FParse::Value(FCommandLine::Get(), TEXT("VIPMoodSeconds="), TestMoodSeconds);
+	if (FParse::Value(FCommandLine::Get(), TEXT("VIPMoods="), Moods, false))
+	{
+		Moods.ParseIntoArray(TestMoods, TEXT(","));
+		NextTestMoodAt = FPlatformTime::Seconds() + 3;
+		bLogFace = true;
+	}
+	SetEmotion(Emotion, Intensity);
+
+	FString Shots;
+	if (FParse::Value(FCommandLine::Get(), TEXT("VIPShots="), Shots, false))
+	{
+		Shots.ParseIntoArray(ShotSteps, TEXT(","));
+		ShotDir = FPaths::ProjectSavedDir() / TEXT("VIPShots");
+		FParse::Value(FCommandLine::Get(), TEXT("VIPShotDir="), ShotDir);
+		NextShotAt = FPlatformTime::Seconds() + 6; // let the face and exposure settle
+		bLogFace = true;
+	}
+}
+
+void UVIPSpeechSubsystem::ApplyTestStep(const FString& Step)
+{
+	// "sad" or "sad@1.5": emotion at an intensity
+	FString Name = Step;
+	FString Strength;
+	float Intensity = TargetIntensity > 0 ? TargetIntensity : 1.0f;
+	if (Step.Split(TEXT("@"), &Name, &Strength))
+	{
+		Intensity = FCString::Atof(*Strength);
+	}
+	SetEmotion(Name, Intensity);
+}
+
+void UVIPSpeechSubsystem::RunShots(double Now)
+{
+	if (ShotSteps.Num() == 0 || Now < NextShotAt)
+	{
+		return;
+	}
+	if (ShotIndex >= ShotSteps.Num())
+	{
+		UE_LOG(LogVIP, Display, TEXT("VIP: SHOTS DONE in %s"), *ShotDir);
+		ShotSteps.Reset();
+		RequestEngineExit(TEXT("VIP shots done"));
+		return;
+	}
+	if (!bShotApplied)
+	{
+		ApplyTestStep(ShotSteps[ShotIndex]);
+		bShotApplied = true;
+		NextShotAt = Now + ShotSettleSeconds;
+		return;
+	}
+	const FString File = ShotDir / FString::Printf(TEXT("%02d_%s.png"), ShotIndex, *ShotSteps[ShotIndex].Replace(TEXT("@"), TEXT("_")));
+	FScreenshotRequest::RequestScreenshot(File, false, false);
+	UE_LOG(LogVIP, Display, TEXT("VIP: shot %s"), *File);
+	bShotApplied = false;
+	++ShotIndex;
+	NextShotAt = Now + 0.5;
 }
 
 void UVIPSpeechSubsystem::DriveFace()
@@ -159,7 +240,7 @@ void UVIPSpeechSubsystem::StartSource(int32 SampleRate)
 	}
 
 	Queue = MakeShared<FVIPSpeechQueue>(SampleRate);
-	TSharedPtr<FVIPSpeechSource> SpeechSource = MakeShared<FVIPSpeechSource>(Queue.ToSharedRef());
+	TSharedPtr<FVIPSpeechSource> SpeechSource = MakeShared<FVIPSpeechSource>(Queue.ToSharedRef(), Expressions.ToSharedRef());
 	Features.GetModularFeature<ILiveLinkClient>(ILiveLinkClient::ModularFeatureName).AddSource(SpeechSource);
 	Source = SpeechSource;
 
@@ -227,21 +308,79 @@ void UVIPSpeechSubsystem::Speak(const TArray<int16>& Samples, int32 SampleRate)
 
 void UVIPSpeechSubsystem::SetEmotion(const FString& Emotion, float Intensity)
 {
-	if (!Settings)
+	const FString Name = Emotion.TrimStartAndEnd().ToLower();
+	if (!VIPExpressions::IsKnown(Name))
+	{
+		UE_LOG(LogVIP, Warning, TEXT("Unknown emotion '%s', using neutral"), *Emotion);
+	}
+	TargetEmotion = VIPExpressions::IsKnown(Name) ? Name : TEXT("neutral");
+	TargetIntensity = FMath::Clamp(Intensity, 0.0f, MaxIntensity);
+	EmotionSetAt = FPlatformTime::Seconds();
+	UE_LOG(LogVIP, Display, TEXT("Emotion %s %.2f"), *TargetEmotion, TargetIntensity);
+}
+
+void UVIPSpeechSubsystem::UpdateEmotion(float DeltaTime)
+{
+	// Full strength while speaking and for a while after, then a resting level until the next turn
+	const double Now = FPlatformTime::Seconds();
+	const bool bHolding = Now < FMath::Max(EmotionSetAt, SpeakingUntil) + HoldSeconds;
+	const float Wanted = TargetEmotion == TEXT("neutral") ? 0.0f : TargetIntensity * (bHolding ? 1.0f : RestFraction);
+	Level = Approach(Level, Wanted, DeltaTime, Wanted > Level ? RiseSeconds : FallSeconds);
+
+	// Our layer cross-fades: the old emotion fades out while the new one fades in
+	TMap<FString, float> Offsets;
+	for (const FString& Name : VIPExpressions::Names())
+	{
+		float& Weight = EmotionWeights.FindOrAdd(Name);
+		Weight = Approach(Weight, Name == TargetEmotion ? 1.0f : 0.0f, DeltaTime, CrossfadeSeconds);
+		VIPExpressions::Add(Name, Weight * Level, Offsets);
+	}
+	// In silence, fade the solver's open-mouthed idle pose out to a closed, relaxed mouth
+	const bool bSpeaking = Now < SpeakingUntil;
+	Rest = Approach(Rest, bSpeaking ? 0.0f : 1.0f, DeltaTime, bSpeaking ? RestOutSeconds : RestInSeconds);
+	if (Expressions)
+	{
+		Expressions->Set(MoveTemp(Offsets));
+		Expressions->SetRest(Rest);
+	}
+
+	// The solver holds one mood up to 1: ramp down, switch, ramp up, so there is no jump
+	const float Step = SolverRampPerSecond * DeltaTime;
+	if (SolverEmotion != TargetEmotion)
+	{
+		SolverIntensity = FMath::Max(0.0f, SolverIntensity - Step);
+		if (SolverIntensity <= 0)
+		{
+			SolverEmotion = TargetEmotion;
+		}
+	}
+	else
+	{
+		const float SolverTarget = FMath::Min(Level, 1.0f);
+		SolverIntensity = SolverIntensity < SolverTarget ? FMath::Min(SolverTarget, SolverIntensity + Step) : SolverTarget;
+	}
+	ApplySolverMood();
+}
+
+void UVIPSpeechSubsystem::ApplySolverMood()
+{
+	if (!Settings || (SolverEmotion == AppliedSolverEmotion && FMath::Abs(SolverIntensity - AppliedSolverIntensity) < 0.01f))
 	{
 		return;
 	}
+	AppliedSolverEmotion = SolverEmotion;
+	AppliedSolverIntensity = SolverIntensity;
 
 	if (Settings->Subject)
 	{
-		Settings->SetMood(ToMood(Emotion));
-		Settings->SetMoodIntensity(Intensity);
+		Settings->Mood = ToMood(SolverEmotion);
+		Settings->SetMoodIntensity(SolverIntensity); // passes mood and intensity to the solver
 	}
 	else
 	{
 		// Live Link creates the subject a frame later and reads these then; the setters would crash now
-		Settings->Mood = ToMood(Emotion);
-		Settings->MoodIntensity = FMath::Clamp(Intensity, 0.0f, 1.0f);
+		Settings->Mood = ToMood(SolverEmotion);
+		Settings->MoodIntensity = FMath::Clamp(SolverIntensity, 0.0f, 1.0f);
 	}
 }
 
@@ -255,6 +394,16 @@ void UVIPSpeechSubsystem::Tick(float DeltaTime)
 		Voice->QueueAudio(reinterpret_cast<const uint8*>(DelayedSound.GetData()), DelayedSound.Num() * sizeof(int16));
 		DelayedSound.Reset();
 	}
+
+	if (NextTestMoodAt > 0 && Now >= NextTestMoodAt && TestMoods.Num() > 0)
+	{
+		SetEmotion(TestMoods[TestMoodIndex], TargetIntensity > 0 ? TargetIntensity : 1.0f);
+		TestMoodIndex = (TestMoodIndex + 1) % TestMoods.Num();
+		NextTestMoodAt = Now + TestMoodSeconds;
+	}
+
+	RunShots(Now);
+	UpdateEmotion(DeltaTime);
 
 	if (NextTestAt > 0 && Now >= NextTestAt)
 	{
@@ -302,10 +451,26 @@ void UVIPSpeechSubsystem::LogFace(float DeltaTime)
 		const int32 Index = Static->PropertyNames.IndexOfByKey(FName(Name));
 		return Data->PropertyValues.IsValidIndex(Index) ? Data->PropertyValues[Index] : -1.0f;
 	};
+	if (FParse::Param(FCommandLine::Get(), TEXT("VIPDumpControls")))
+	{
+		FString High;
+		for (int32 i = 0; i < Static->PropertyNames.Num() && i < Data->PropertyValues.Num(); ++i)
+		{
+			if (FMath::Abs(Data->PropertyValues[i]) > 0.25f)
+			{
+				High += FString::Printf(TEXT("%s=%.2f "), *Static->PropertyNames[i].ToString(), Data->PropertyValues[i]);
+			}
+		}
+		UE_LOG(LogVIP, Display, TEXT("frame %d names %d values, high: %s"), Static->PropertyNames.Num(), Data->PropertyValues.Num(), *High);
+	}
 	UE_LOG(LogVIP, Display, TEXT("face %s: jaw=%.2f blink=%.2f headSwitch=%.0f yaw=%.1f pitch=%.1f"),
 		FPlatformTime::Seconds() < SpeakingUntil ? TEXT("speaking") : TEXT("silent"),
 		Value(TEXT("CTRL_expressions_jawOpen")), Value(TEXT("CTRL_expressions_eyeBlinkL")),
 		Value(TEXT("HeadControlSwitch")), Value(TEXT("HeadYaw")), Value(TEXT("HeadPitch")));
+	UE_LOG(LogVIP, Display, TEXT("mood %s level=%.2f solver=%s %.2f: browDown=%.2f browRaiseIn=%.2f cornerPull=%.2f cornerDepress=%.2f"),
+		*TargetEmotion, Level, *SolverEmotion, SolverIntensity,
+		Value(TEXT("CTRL_expressions_browDownL")), Value(TEXT("CTRL_expressions_browRaiseInL")),
+		Value(TEXT("CTRL_expressions_mouthCornerPullL")), Value(TEXT("CTRL_expressions_mouthCornerDepressL")));
 }
 
 void UVIPSpeechSubsystem::Deinitialize()

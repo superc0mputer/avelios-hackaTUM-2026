@@ -1,5 +1,10 @@
 #include "VIPSpeechSource.h"
 
+#include "VIPExpressions.h"
+
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
+
 #include "MetaHumanAudioBaseLiveLinkSubjectSettings.h"
 #include "MetaHumanHeadTransform.h"
 
@@ -42,9 +47,11 @@ void FVIPSpeechQueue::Take(TArray<float>& Out, int32 Count)
 }
 
 FVIPSpeechSubject::FVIPSpeechSubject(ILiveLinkClient* InClient, const FGuid& InSourceGuid, const FName& InName,
-	UMetaHumanAudioBaseLiveLinkSubjectSettings* InSettings, TSharedRef<FVIPSpeechQueue> InQueue)
+	UMetaHumanAudioBaseLiveLinkSubjectSettings* InSettings, TSharedRef<FVIPSpeechQueue> InQueue,
+	TSharedRef<FVIPExpressionLayer> InExpressions)
 	: FMetaHumanAudioBaseLiveLinkSubject(InClient, InSourceGuid, InName, InSettings)
 	, Queue(InQueue)
+	, Expressions(InExpressions)
 {
 }
 
@@ -90,6 +97,19 @@ void FVIPSpeechSubject::ExtractPipelineData(TSharedPtr<UE::MetaHuman::Pipeline::
 	if (Animation.AnimationData.IsEmpty())
 	{
 		return;
+	}
+
+	static double NextDump = 0;
+	const bool bDump = FParse::Param(FCommandLine::Get(), TEXT("VIPDumpControls")) && FPlatformTime::Seconds() > NextDump;
+	auto Pick = [this](const TCHAR* Name) { const float* V = Animation.AnimationData.Find(Name); return V ? *V : -1.0f; };
+	const float BeforeBrow = Pick(TEXT("CTRL_expressions_browDownL"));
+	const float BeforeCorner = Pick(TEXT("CTRL_expressions_mouthCornerPullL"));
+	Expressions->ApplyTo(Animation.AnimationData);
+	if (bDump)
+	{
+		NextDump = FPlatformTime::Seconds() + 1;
+		UE_LOG(LogTemp, Display, TEXT("VIP layer: browDownL %.2f -> %.2f, cornerPullL %.2f -> %.2f"),
+			BeforeBrow, Pick(TEXT("CTRL_expressions_browDownL")), BeforeCorner, Pick(TEXT("CTRL_expressions_mouthCornerPullL")));
 	}
 
 	const double Now = FPlatformTime::Seconds();
@@ -143,5 +163,5 @@ TSharedPtr<FMetaHumanLocalLiveLinkSubject> FVIPSpeechSource::CreateSubject(const
 	UMetaHumanLocalLiveLinkSubjectSettings* InSettings)
 {
 	return MakeShared<FVIPSpeechSubject>(LiveLinkClient, SourceGuid, InSubjectName,
-		CastChecked<UMetaHumanAudioBaseLiveLinkSubjectSettings>(InSettings), Queue);
+		CastChecked<UMetaHumanAudioBaseLiveLinkSubjectSettings>(InSettings), Queue, Expressions);
 }

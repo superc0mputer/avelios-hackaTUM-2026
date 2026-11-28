@@ -4,6 +4,8 @@
 #include "MetaHumanAudioBaseLiveLinkSubject.h"
 #include "MetaHumanLocalLiveLinkSource.h"
 
+class FVIPExpressionLayer;
+
 /** Speech waiting to be turned into face animation. Written by the game thread, read by the solver. */
 class FVIPSpeechQueue
 {
@@ -34,18 +36,20 @@ class FVIPSpeechSubject : public FMetaHumanAudioBaseLiveLinkSubject
 public:
 
 	FVIPSpeechSubject(ILiveLinkClient* InClient, const FGuid& InSourceGuid, const FName& InName,
-		UMetaHumanAudioBaseLiveLinkSubjectSettings* InSettings, TSharedRef<FVIPSpeechQueue> InQueue);
+		UMetaHumanAudioBaseLiveLinkSubjectSettings* InSettings, TSharedRef<FVIPSpeechQueue> InQueue,
+		TSharedRef<FVIPExpressionLayer> InExpressions);
 
 protected:
 
 	virtual void MediaSamplerMain() override;
 
-	/** Adds idle life on top of the solver: blinks and slight head motion. */
+	/** Adds on top of the solver: the emotion layer, blinks and slight head motion. */
 	virtual void ExtractPipelineData(TSharedPtr<UE::MetaHuman::Pipeline::FPipelineData> InPipelineData) override;
 
 private:
 
 	TSharedRef<FVIPSpeechQueue> Queue;
+	TSharedRef<FVIPExpressionLayer> Expressions;
 
 	// Only touched on the pipeline thread
 	FRandomStream Random{FPlatformTime::Cycles()};
@@ -58,7 +62,8 @@ class FVIPSpeechSource : public FMetaHumanLocalLiveLinkSource
 {
 public:
 
-	explicit FVIPSpeechSource(TSharedRef<FVIPSpeechQueue> InQueue) : Queue(InQueue) {}
+	FVIPSpeechSource(TSharedRef<FVIPSpeechQueue> InQueue, TSharedRef<FVIPExpressionLayer> InExpressions)
+		: Queue(InQueue), Expressions(InExpressions) {}
 
 	virtual FText GetSourceType() const override;
 
@@ -70,4 +75,5 @@ protected:
 private:
 
 	TSharedRef<FVIPSpeechQueue> Queue;
+	TSharedRef<FVIPExpressionLayer> Expressions;
 };
