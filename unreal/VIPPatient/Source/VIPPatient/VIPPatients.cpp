@@ -34,14 +34,14 @@ namespace
 		return Result;
 	}
 
-	bool HeadHeight(const AActor& Patient, float& OutZ)
+	bool HeadLocation(const AActor& Patient, FVector& Out)
 	{
 		TInlineComponentArray<USkeletalMeshComponent*> Meshes(&Patient);
 		for (const USkeletalMeshComponent* Mesh : Meshes)
 		{
 			if (Mesh->GetBoneIndex(HeadBone) != INDEX_NONE)
 			{
-				OutZ = Mesh->GetBoneLocation(HeadBone).Z;
+				Out = Mesh->GetBoneLocation(HeadBone);
 				return true;
 			}
 		}
@@ -88,8 +88,8 @@ AActor* VIPPatients::Choose(UWorld& World, const FString& Gender, int32 Age, int
 		return Placed;
 	}
 
-	float OldHead = 0;
-	const bool bHadHead = Placed && HeadHeight(*Placed, OldHead);
+	FVector OldHead = FVector::ZeroVector;
+	const bool bHadHead = Placed && HeadLocation(*Placed, OldHead);
 
 	AActor* Patient = Placed;
 	if (!Placed || Placed->GetClass() != Class)
@@ -111,17 +111,20 @@ AActor* VIPPatients::Choose(UWorld& World, const FString& Gender, int32 Age, int
 		*OutAge = Best->Age;
 	}
 
-	// Patients differ in height: keep the camera and face lights at the same place relative to the head
-	float NewHead = 0;
-	if (bHadHead && HeadHeight(*Patient, NewHead) && !FMath::IsNearlyEqual(NewHead, OldHead, 0.5f))
+	// Patients differ in height and build: keep the camera and face lights at the same place relative
+	// to the head (a heavier patient's head also sits further forward, which framed him too close)
+	FVector NewHead = FVector::ZeroVector;
+	if (bHadHead && HeadLocation(*Patient, NewHead) && !NewHead.Equals(OldHead, 0.5))
 	{
+		const FVector Delta = NewHead - OldHead;
 		for (TActorIterator<AActor> It(&World); It; ++It)
 		{
 			if (It->ActorHasTag(FollowHeadTag))
 			{
-				It->AddActorWorldOffset(FVector(0, 0, NewHead - OldHead));
+				It->AddActorWorldOffset(Delta);
 			}
 		}
+		UE_LOG(LogVIPPatients, Display, TEXT("Camera and face lights follow the head by %s"), *Delta.ToString());
 	}
 	return Patient;
 }

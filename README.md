@@ -158,6 +158,13 @@ unreal/package.sh
 
 On Windows: `powershell -ExecutionPolicy Bypass -File unreal\package.ps1` (not tested yet). The app lands in `unreal/VIPPatient/Saved/Package/` and is about 2 GB. It contains Epic assets, so **never commit or publish it**; share it privately. The Mac app is not signed with a developer account yet, so another Mac will ask for permission the first time it opens.
 
+### Demo view (#26)
+
+- Full screen: start the packaged app with `-fullscreen` (standard Unreal flag; not tested yet on the demo machine).
+- Delay Unreal adds: speech is held back 0.12 s so lips and voice line up (`SoundDelaySeconds`); the face starts moving as soon as audio arrives. Not measured end to end yet.
+- If Unreal fails: the teacher page plays the patient's voice itself whenever no Unreal client is connected to the voice server (#49), so the conversation goes on voice-only.
+- Checked tonight: the packaged app (2.4 GB) loads a case, swaps the patient, plays the body idle and shows signs, breathing, emotions and pain.
+
 ### Patients
 
 The app has six patients, built from Epic presets listed in `unreal/VIPPatient/Scripts/patients.json`. Ages are estimated from how the faces look:
@@ -171,7 +178,7 @@ The app has six patients, built from Epic presets listed in `unreal/VIPPatient/S
 | Bruce | male | 50 |
 | Walter | male | 72 (default) |
 
-The app shows the patient closest to the case: gender first, then age. For now this comes from the command line, for example `-VIPGender=female -VIPAge=25` (from the case JSON later, #24). The camera and face lights follow the patient's head height.
+The app shows the patient closest to the case: gender first, then age. For now this comes from the command line, for example `-VIPGender=female -VIPAge=25` (from the case JSON later, #24). The camera and face lights follow the patient's head position.
 
 To add a patient, add a line to `patients.json` with an Epic preset name (see `Engine/Plugins/MetaHuman/MetaHumanCharacter/Content/Optional/Presets` in the Unreal folder) and run the build again. Each patient adds about 10 minutes of build time and about 0.5 GB to the app.
 
