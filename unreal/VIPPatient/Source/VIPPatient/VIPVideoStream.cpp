@@ -11,6 +11,7 @@
 #include "IImageWrapperModule.h"
 #include "Modules/ModuleManager.h"
 #include "Slate/SceneViewport.h"
+#include "Widgets/SWindow.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogVIPVideo, Log, All);
 
@@ -53,10 +54,13 @@ void UVIPVideoStream::StartCapture()
 	{
 		return; // no game window yet; try again next tick
 	}
-	Grabber = MakeShared<FFrameGrabber>(GameEngine->SceneViewport.ToSharedRef(), FrameSize);
+	const TSharedPtr<SWindow> Window = GameEngine->GameViewportWindow.Pin();
+	CaptureScale = FMath::Max(1, FMath::RoundToInt(Window.IsValid() ? Window->GetDPIScaleFactor() : 1.0f));
+	Grabber = MakeShared<FFrameGrabber>(GameEngine->SceneViewport.ToSharedRef(), FrameSize * CaptureScale);
 	Grabber->StartCapturingFrames();
 	NextFrameAt = 0;
-	UE_LOG(LogVIPVideo, Display, TEXT("Streaming the patient at %dx%d, %.0f fps"), FrameSize.X, FrameSize.Y, FramesPerSecond);
+	UE_LOG(LogVIPVideo, Display, TEXT("Streaming the patient at %dx%d, %.0f fps (screen scale %d)"),
+		FrameSize.X, FrameSize.Y, FramesPerSecond, CaptureScale);
 }
 
 void UVIPVideoStream::StopCapture()
@@ -103,7 +107,22 @@ void UVIPVideoStream::Tick(float DeltaTime)
 	if (Frames.Num() > 0 && !bEncoding->load())
 	{
 		FCapturedFrameData& Newest = Frames.Last();
-		EncodeAndSend(MoveTemp(Newest.ColorBuffer), Newest.BufferSize);
+		if (Newest.BufferSize == FrameSize)
+		{
+			EncodeAndSend(MoveTemp(Newest.ColorBuffer), FrameSize);
+		}
+		else if (Newest.BufferSize.X >= FrameSize.X && Newest.BufferSize.Y >= FrameSize.Y
+			&& Newest.ColorBuffer.Num() == Newest.BufferSize.X * Newest.BufferSize.Y)
+		{
+			// Keep the top-left FrameSize, where the picture is
+			TArray<FColor> Cropped;
+			Cropped.SetNumUninitialized(FrameSize.X * FrameSize.Y);
+			for (int32 Row = 0; Row < FrameSize.Y; ++Row)
+			{
+				FMemory::Memcpy(&Cropped[Row * FrameSize.X], &Newest.ColorBuffer[Row * Newest.BufferSize.X], FrameSize.X * sizeof(FColor));
+			}
+			EncodeAndSend(MoveTemp(Cropped), FrameSize);
+		}
 	}
 }
 

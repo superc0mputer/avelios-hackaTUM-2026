@@ -40,6 +40,10 @@ private:
 	void EncodeAndSend(TArray<FColor>&& Pixels, FIntPoint Size);
 
 	TSharedPtr<FFrameGrabber> Grabber;
+
+	// The grabber fills only 1/Scale of its buffer on high-DPI screens (Retina: 2), so it gets a
+	// buffer Scale times larger and we keep the filled top-left part
+	int32 CaptureScale = 1;
 	int32 Viewers = 0;
 	double NextFrameAt = 0;
 
