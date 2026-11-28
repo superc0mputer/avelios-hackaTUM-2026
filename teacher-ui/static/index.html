@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f5f8fa">
+    <title>VIP · Create a patient case</title>
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="VIP Case Studio home"><span class="brand-mark">V</span><span><strong>VIP</strong><small>Case Studio</small></span></a>
+      <div class="top-context"><i></i> Local authoring workspace</div>
+      <span class="top-tag">TEACHER TOOL</span>
+    </header>
+
+    <main class="page-shell">
+      <section class="page-heading">
+        <div class="hero-copy">
+          <p class="eyebrow">CASE AUTHORING</p>
+          <h1>Build a patient<br><span>students can learn from.</span></h1>
+          <p>Create a guided interview case, one step at a time.</p>
+        </div>
+      </section>
+
+      <section class="character-preview" aria-labelledby="character-title">
+        <div class="avatar-window" id="avatar-window" data-character-id="man-01" aria-label="Animated mock character preview">
+          <div class="avatar-art" aria-hidden="true">
+            <div class="avatar-hair"></div>
+            <div class="avatar-head"><i class="eye eye-left"></i><i class="eye eye-right"></i><i class="avatar-mouth"></i></div>
+            <div class="avatar-neck"></div><div class="avatar-body"></div>
+          </div>
+          <span class="preview-chip">CHARACTER PREVIEW</span>
+          <span class="preview-caption">MetaHuman preview</span>
+        </div>
+        <div class="character-details">
+          <p class="eyebrow">PATIENT APPEARANCE</p>
+          <h2 id="character-title">Man 01</h2>
+          <p class="character-copy">Choose one of the six demo characters. This animated placeholder will be replaced with your MetaHuman previews.</p>
+          <div class="character-options" id="character-options" role="group" aria-label="Choose a demo character"></div>
+          <input id="character-id" type="hidden" value="man-01">
+        </div>
+      </section>
+
+      <div class="wizard-heading" id="wizard-heading">
+        <div class="wizard-count" id="wizard-count">STEP 1 OF 3</div>
+        <div class="wizard-title-row"><h2 id="wizard-title">Patient profile</h2><span id="wizard-hint">Start with the patient’s identity and diagnosis.</span></div>
+        <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
+        <nav class="step-labels" aria-label="Wizard progress">
+          <span class="step-label active" data-step-label="0">Patient</span>
+          <span class="step-label" data-step-label="1">Personality</span>
+          <span class="step-label" data-step-label="2">Clinical facts</span>
+        </nav>
+      </div>
+
+      <form id="case-form" novalidate>
+        <section class="card section wizard-step" data-step="0" aria-labelledby="step-patient-title">
+          <h2 id="step-patient-title">Who is the patient?</h2>
+          <p class="section-intro">The diagnosis is private to the teacher. Students will work it out through the conversation.</p>
+          <div class="grid three">
+            <label class="field"><span>Name <b>*</b></span><input id="name" required placeholder="Full name"></label>
+            <label class="field"><span>Age <b>*</b></span><input id="age" type="number" min="18" max="110" required placeholder="58"></label>
+            <label class="field"><span>Gender <b>*</b></span><select id="gender" required>
+              <option value="male">Man</option><option value="female">Woman</option><option value="non_binary">Non-binary</option><option value="other">Self-describe</option>
+            </select></label>
+            <label class="field full" id="gender-other-wrap" hidden><span>Gender description <b>*</b></span><input id="gender-other" placeholder="Describe the patient's gender"></label>
+            <label class="field full"><span>Life story <b>*</b></span><textarea id="life-story" required rows="3" placeholder="Work, relationships, routines, and experiences that shape this patient"></textarea></label>
+            <label class="field full"><span>Likely diagnosis <b>*</b></span><input id="diagnosis" required placeholder="e.g. stable angina"></label>
+          </div>
+        </section>
+
+        <section class="card section wizard-step" data-step="1" aria-labelledby="step-personality-title" hidden>
+          <h2 id="step-personality-title">How should the patient come across?</h2>
+          <p class="section-intro">Personality shapes how the patient responds and how readily they share difficult facts.</p>
+          <div class="grid two">
+            <label class="field"><span>Personality <b>*</b></span><select id="personality-type" required>
+              <option value="downplays_everything">Downplays everything</option>
+              <option value="anxious_talkative">Anxious and talkative</option>
+              <option value="shy_reserved">Shy and reserved</option>
+              <option value="assertive">Assertive</option>
+              <option value="distrustful">Distrustful</option>
+              <option value="custom">Custom</option>
+            </select></label>
+            <label class="field"><span>Starting mood <b>*</b></span><select id="mood" required>
+              <option value="neutral">Neutral</option><option value="happy">Happy</option><option value="sad">Sad</option><option value="fear">Fear</option><option value="disgust">Disgust</option><option value="anger">Anger</option><option value="surprise">Surprise</option>
+            </select></label>
+            <label class="field full"><span>Personality detail <small>(optional)</small></span><textarea id="personality-description" rows="3" placeholder="How the patient reacts, communicates, and relates to their life story"></textarea></label>
+          </div>
+          <div class="mapping-note"><span>Disclosure style for this personality</span><strong id="mapping-copy">Minimizes at first; secrets emerge after specific, respectful follow-up.</strong></div>
+        </section>
+
+        <section class="card section wizard-step" data-step="2" aria-labelledby="step-facts-title" hidden>
+          <h2 id="step-facts-title">What does the patient know?</h2>
+          <p class="section-intro">Add one fact per line. Secrets are true facts the patient shares reluctantly.</p>
+          <label class="field"><span>Symptoms <b>*</b></span><textarea id="symptoms" required rows="4" placeholder="Chest pressure for three months&#10;Triggered by brisk walking and eases with rest"></textarea></label>
+          <div class="grid two compact-grid">
+            <label class="field"><span>Medical history</span><textarea id="medical-history" rows="2" placeholder="High blood pressure"></textarea></label>
+            <label class="field"><span>Medication</span><textarea id="medications" rows="2" placeholder="Amlodipine"></textarea></label>
+            <label class="field"><span>Allergies</span><textarea id="allergies" rows="2" placeholder="No known medication allergies"></textarea></label>
+            <label class="field"><span>Family history</span><textarea id="family-history" rows="2" placeholder="Father had a heart attack"></textarea></label>
+            <label class="field"><span>Lifestyle</span><textarea id="lifestyle" rows="2" placeholder="Home, work, activity, smoking, alcohol"></textarea></label>
+            <label class="field"><span>Secrets</span><textarea id="secrets" rows="2" placeholder="Smokes 20 cigarettes a day; reluctant to disclose"></textarea></label>
+          </div>
+        </section>
+
+        <div class="form-footer">
+          <span id="status" role="status" aria-live="polite"></span>
+          <div class="wizard-actions">
+            <button class="back-button" id="back-button" type="button" hidden>← Back</button>
+            <button class="save-button" id="next-button" type="button">Continue <span>→</span></button>
+            <button class="save-button" id="save-button" type="submit" hidden>Validate &amp; save <span>✓</span></button>
+          </div>
+        </div>
+      </form>
+      <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    </main>
+  </body>
+</html>
