@@ -10,6 +10,7 @@ class FVIPLife;
 class FVIPSpeechQueue;
 class UMetaHumanAudioBaseLiveLinkSubjectSettings;
 class UAudioComponent;
+class USkeletalMeshComponent;
 class USoundWaveProcedural;
 
 /**
@@ -53,6 +54,7 @@ private:
 
 	void StartSource(int32 SampleRate);
 	void DriveFace();
+	void AnimateBody(USkeletalMeshComponent& Body);
 	void UpdateEmotion(float DeltaTime);
 	void ApplySolverMood();
 	void LogFace(float DeltaTime);

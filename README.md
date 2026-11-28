@@ -165,6 +165,7 @@ To add a patient, add a line to `patients.json` with an Epic preset name (see `E
 - `UVIPSpeechSubsystem::SetEmotion(emotion, intensity)`: one of the shared emotion names; unknown names fall back to `neutral`. Intensity goes from 0 to 2. A new emotion blends in over about a second. It stays at full strength while the patient speaks and for 4 s after, then eases to half strength until the next turn (#39).
 - The solver's own moods are subtle and stop at intensity 1, so `VIPExpressions.cpp` adds face controls for each emotion (brows, eyes, cheeks, nose, mouth corners, based on FACS action units) on top. Lips and jaw are left to lip sync.
 - In silence the solver settles into a pose with the mouth open and teeth showing, which looks like the patient is about to speak. Between turns its face is faded out to a closed, relaxed mouth (in 0.5 s), and it takes over again within a few frames when speech starts.
+- The body plays Epic's MetaHuman standing idle loop (`AS_MH_Neutral_Stand_Idle_Loop`, from the engine's MetaHuman plugin, not stored here), so the shoulders relax and the body breathes and shifts slightly instead of holding the A-pose. `-VIPBodyAnim=none` turns it off, `-VIPBodyAnim=<path>` uses another animation.
 - `VIPLife.cpp` adds involuntary movement so the face is never still (#44): small eye jumps between the student's eyes and face, now and then a short glance aside (often with a blink), blinks every 2 to 6 s and sometimes double, slow slight brow, lid and mouth-corner movement, and head sway. Older patients move less and slower. Later issues steer it (gaze and head offsets, blink rate).
 
 Try it with any 16-bit WAV file (for example one made with `say -o test.wav --data-format=LEI16@24000 "Hello doctor"` on macOS):
@@ -178,7 +179,7 @@ The packaged app takes the same options. On macOS it is sandboxed, so put the fi
 
 `-VIPIntensity=1.5` sets the strength. `-VIPMoods=neutral,sad,neutral,anger -VIPMoodSeconds=5` steps through moods to compare them with neutral.
 
-`-VIPShots=neutral,sad,sad@2,anger` takes a screenshot of each step (emotion, optionally `@intensity`) into `Saved/VIPShots/` and quits, so looks can be compared without anyone watching. `-VIPDumpControls` logs the face control values the layer writes.
+`-VIPShots=neutral,sad,sad@2,anger` takes a screenshot of each step (emotion, optionally `@intensity`) into `Saved/VIPShots/` and quits, so looks can be compared without anyone watching. `-VIPDumpControls` logs the face control values the layer writes. `-VIPWide=250` pulls the camera back to see the whole patient.
 
 The patient repeats the file every few seconds and logs jaw, blink, head and mood values to `Saved/Logs`. Turns from the patient engine are not connected yet (#24).
 

@@ -6,6 +6,7 @@
 #include "VIPSpeechSource.h"
 
 #include "Animation/AnimInstance.h"
+#include "Animation/AnimSequence.h"
 #include "Audio.h"
 #include "Components/AudioComponent.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -14,6 +15,7 @@
 #include "ILiveLinkClient.h"
 #include "LiveLinkTypes.h"
 #include "Roles/LiveLinkBasicRole.h"
+#include "Camera/CameraActor.h"
 #include "Kismet/GameplayStatics.h"
 #include "MetaHumanAudioBaseLiveLinkSubjectSettings.h"
 #include "Misc/CommandLine.h"
@@ -151,6 +153,16 @@ void UVIPSpeechSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	}
 	SetEmotion(Emotion, Intensity);
 
+	// -VIPWide: pull the camera back to see the whole patient (clothing, posture, breathing checks)
+	float Wide = 0;
+	if (FParse::Value(FCommandLine::Get(), TEXT("VIPWide="), Wide))
+	{
+		for (TActorIterator<ACameraActor> It(&InWorld); It; ++It)
+		{
+			It->AddActorWorldOffset(FVector(0, Wide, -Wide * 0.35f));
+		}
+	}
+
 	FString Shots;
 	if (FParse::Value(FCommandLine::Get(), TEXT("VIPShots="), Shots, false))
 	{
@@ -203,6 +215,27 @@ void UVIPSpeechSubsystem::RunShots(double Now)
 	NextShotAt = Now + 0.5;
 }
 
+void UVIPSpeechSubsystem::AnimateBody(USkeletalMeshComponent& Body)
+{
+	// Without body data the MetaHuman stands in the A-pose with its arms out. Epic's idle loop gives
+	// arms down, breathing and small weight shifts (#44, #36)
+	FString Path = TEXT("/MetaHumanCharacter/Optional/Animation/UEFNAnimPreset/Locomotion/AS_MH_Neutral_Stand_Idle_Loop.AS_MH_Neutral_Stand_Idle_Loop");
+	FParse::Value(FCommandLine::Get(), TEXT("VIPBodyAnim="), Path);
+	if (Path == TEXT("none"))
+	{
+		return;
+	}
+	UAnimSequence* Idle = LoadObject<UAnimSequence>(nullptr, *Path);
+	if (!Idle)
+	{
+		UE_LOG(LogVIP, Warning, TEXT("Body idle %s not found, body stays in its rest pose"), *Path);
+		return;
+	}
+	Body.PlayAnimation(Idle, true);
+	Body.SetPosition(FMath::FRandRange(0.0f, Idle->GetPlayLength())); // patients do not all start alike
+	UE_LOG(LogVIP, Display, TEXT("Body plays %s"), *Idle->GetName());
+}
+
 void UVIPSpeechSubsystem::DriveFace()
 {
 	// The MetaHuman blueprint only switches the face to Live Link in the editor, so do it here
@@ -218,6 +251,17 @@ void UVIPSpeechSubsystem::DriveFace()
 		TInlineComponentArray<USkeletalMeshComponent*> Meshes(*It);
 		for (USkeletalMeshComponent* Mesh : Meshes)
 		{
+			if (FParse::Param(FCommandLine::Get(), TEXT("VIPDumpControls")))
+			{
+				UE_LOG(LogVIP, Display, TEXT("mesh %s.%s: mode %d, anim %s, leader %s, bones %d"), *It->GetName(), *Mesh->GetName(),
+					static_cast<int32>(Mesh->GetAnimationMode()), Mesh->GetAnimClass() ? *Mesh->GetAnimClass()->GetName() : TEXT("none"),
+					Mesh->LeaderPoseComponent.IsValid() ? *Mesh->LeaderPoseComponent->GetName() : TEXT("none"), Mesh->GetNumBones());
+			}
+			if (Mesh->GetName() == TEXT("Body"))
+			{
+				AnimateBody(*Mesh);
+				continue;
+			}
 			if (Mesh->GetName() != TEXT("Face"))
 			{
 				continue;
