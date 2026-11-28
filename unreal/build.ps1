@@ -79,6 +79,12 @@ function Invoke-Stage($name, $relativeOutput) {
     Write-Host "== ${name}: done"
 }
 
+# our C++ module (Source/VIPPatient) needs Visual Studio 2022 with "Game development with C++"
+Write-Host "== compiling the C++ module"
+$compileLog = Join-Path $logs "compile.log"
+& (Join-Path $ueRoot "Engine\Build\BatchFiles\Build.bat") VIPPatientEditor Win64 Development "-project=$project" -waitmutex *> $compileLog
+if ($LASTEXITCODE) { Fail "compile failed, see $compileLog" }
+
 Invoke-Stage "build_character" "Patient\MHC_Patient.uasset"
 Invoke-Stage "assemble" "MetaHumans\MHC_Patient\Face\SKM_MHC_Patient_FaceMesh.uasset"
 Invoke-Stage "build_scene" "Patient\ConsultationRoom.umap"

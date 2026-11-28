@@ -100,13 +100,13 @@ So far only the Unreal patient can be run (see below). Other setup instructions 
 
 ## Run the Unreal patient
 
-The repository holds only our project file, config and build scripts. The MetaHuman is **rebuilt on your machine** from an Epic preset, so no Epic assets are published.
+The repository holds only our project file, config, C++ module and build scripts. The MetaHuman is **rebuilt on your machine** from an Epic preset, so no Epic assets are published.
 
 **You need**
-- macOS (tested on an M4 MacBook Air with 16 GB) or Windows (**not tested yet**). Linux is not supported.
+- macOS (tested on an M4 MacBook Air with 16 GB, Xcode 26.6) or Windows (**not tested yet**; needs Visual Studio 2022 with "Game development with C++"). Linux is not supported.
 - Unreal Engine 5.8 with **MetaHuman Creator Core Data** (Epic Games Launcher → 5.8 → Options)
 - An Epic account signed in through the launcher, and internet: textures and rig come from Epic's online services
-- About 2 GB of free disk space, and a short repository path without spaces
+- About 5 GB of free disk space (more for packaging), and a short repository path without spaces
 
 macOS:
 
@@ -131,15 +131,44 @@ On Windows use `-Clean` and `-Run`, and set `$env:VIP_PRESET` or `$env:UE_ROOT` 
 
 Logs are in `unreal/VIPPatient/Saved/BuildLogs/`. To edit the scene, open `unreal/VIPPatient/VIPPatient.uproject` after building.
 
+### Standalone app
+
+For people without Unreal, package the patient once per operating system, on that system:
+
+```bash
+unreal/package.sh
+```
+
+On Windows: `powershell -ExecutionPolicy Bypass -File unreal\package.ps1` (not tested yet). The app lands in `unreal/VIPPatient/Saved/Package/` and is about 2 GB. It contains Epic assets, so **never commit or publish it**; share it privately. The Mac app is not signed with a developer account yet, so another Mac will ask for permission the first time it opens.
+
+### How the patient speaks
+
+`Source/VIPPatient` feeds speech audio straight into MetaHuman's audio-to-face solver, so generated voice (ElevenLabs) moves the lips without a microphone or virtual audio cable. The same samples are played as sound, held back about 0.12 s so lips and voice line up.
+
+- `UVIPSpeechSubsystem::Speak(samples, rate)`: mono 16-bit PCM at any rate (24 kHz is used inside).
+- `UVIPSpeechSubsystem::SetEmotion(emotion, intensity)`: one of the shared emotion names; unknown names fall back to `neutral`.
+- On top of the solver it adds blinks every few seconds and slight head motion, so the patient does not stare while listening.
+
+Try it with any 16-bit WAV file (for example one made with `say -o test.wav --data-format=LEI16@24000 "Hello doctor"` on macOS):
+
+```bash
+"/Users/Shared/Epic Games/UE_5.8/Engine/Binaries/Mac/UnrealEditor.app/Contents/MacOS/UnrealEditor" \
+  "$PWD/unreal/VIPPatient/VIPPatient.uproject" -game -windowed -VIPWav=$PWD/test.wav -VIPMood=sad
+```
+
+The packaged app takes the same options. On macOS it is sandboxed, so put the file under `~/Library/Containers/io.github.superc0mputer.VIPPatient/Data/`.
+
+The patient repeats the file every few seconds and logs jaw, blink and head values to `Saved/Logs`. Turns from the patient engine are not connected yet (#24).
+
 **Rules for this public repository**
-- Never commit anything from `Content/MetaHumans/` or `Content/Patient/` (already ignored).
+- Never commit anything from `Content/MetaHumans/`, `Content/Patient/` or `Saved/` (already ignored).
 - Changes made by hand to those generated assets are lost on `--clean`. Put them into the scripts in `unreal/VIPPatient/Scripts/`.
 
-**Current state:** a standing patient with camera and lights. Facial animation is untested (#22) and there is no room yet.
+**Current state:** the patient sits in a simple consultation room, speaks a WAV file with lip sync, blinks and moves the head slightly, in the game window and in a packaged Mac app. Tested on one Mac only; lip sync with a macOS test voice judged good by ear (ElevenLabs not tried yet). Not connected to the patient engine yet.
 
 ## Technical notes (from the docs, not yet tested by us)
 
-- [MetaHuman audio source](https://dev.epicgames.com/documentation/metahuman/using-a-metahuman-audio-source-in-unreal-engine): drives the face live from a capture device and has the mood setting. It does not describe using generated audio, which is our biggest risk (#23).
+- [MetaHuman audio source](https://dev.epicgames.com/documentation/metahuman/using-a-metahuman-audio-source-in-unreal-engine): drives the face live from a capture device and has the mood setting. We use its solver with our own audio instead (see above, #23).
 - [ElevenLabs models](https://elevenlabs.io/docs/overview/models): `eleven_v4_turbo` and `eleven_v3_conversational` support audio tags for emotion.
 
 ## What the challenge asks for

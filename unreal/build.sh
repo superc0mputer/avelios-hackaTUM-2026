@@ -3,6 +3,7 @@
 #   unreal/build.sh            build whatever is missing
 #   unreal/build.sh --clean    delete the generated content and rebuild
 #   unreal/build.sh --run      build if needed, then open the patient window
+#   unreal/package.sh          standalone app for people without Unreal
 # Options: UE_ROOT=<engine folder>  VIP_PRESET=<Epic preset name>
 set -euo pipefail
 
@@ -56,6 +57,10 @@ stage() {  # stage <script name> <file it must produce>
   fi
   echo "== $name: done"
 }
+
+echo "== compiling the C++ module (Source/VIPPatient)"
+"$UE_ROOT/Engine/Build/BatchFiles/Mac/Build.sh" VIPPatientEditor Mac Development -project="$project" -waitmutex \
+  > "$logs/compile.log" 2>&1 || die "compile failed, see $logs/compile.log"
 
 stage build_character "$content/Patient/MHC_Patient.uasset"
 stage assemble "$content/MetaHumans/MHC_Patient/Face/SKM_MHC_Patient_FaceMesh.uasset"
