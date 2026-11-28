@@ -9,6 +9,8 @@
 #include "FrameGrabber.h"
 #include "IImageWrapper.h"
 #include "IImageWrapperModule.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
 #include "Modules/ModuleManager.h"
 #include "Slate/SceneViewport.h"
 
@@ -16,10 +18,15 @@ DEFINE_LOG_CATEGORY_STATIC(LogVIPVideo, Log, All);
 
 namespace
 {
-	// Small enough for a few testers over the internet: about 25-40 KB per frame
-	const FIntPoint FrameSize(640, 360);
-	constexpr double FramesPerSecond = 15.0;
-	constexpr int32 JpegQuality = 70;
+	// Defaults: the window's own size (1280x720 from build.sh), JPEG quality 80, 15 fps: about
+	// 60-90 KB per frame, ~1 MB/s per viewer. Change with -VIPVideoWidth=, -VIPVideoQuality=,
+	// -VIPVideoFps= (height follows the window's aspect ratio).
+	int32 OptionOr(const TCHAR* Name, int32 Default)
+	{
+		int32 Value = Default;
+		FParse::Value(FCommandLine::Get(), Name, Value);
+		return Value;
+	}
 
 	struct FVIPFramePayload : IFramePayload
 	{
@@ -47,11 +54,15 @@ namespace
 		return 0;
 	}
 
-	/** The drawn part of a grabbed frame, scaled to FrameSize (each output pixel averages 4 samples). */
-	TArray<FColor> ScaleDown(const TArray<FColor>& Pixels, FIntPoint Size)
+	/** The drawn part of a grabbed frame at FrameSize (each output pixel averages 4 samples). */
+	TArray<FColor> ScaleDown(TArray<FColor>&& Pixels, FIntPoint Size, FIntPoint FrameSize)
 	{
 		const int32 SrcW = FMath::Max(1, FilledWidth(Pixels, Size));
 		const int32 SrcH = FMath::Clamp(SrcW * Size.Y / Size.X, 1, Size.Y);
+		if (SrcW == Size.X && Size == FrameSize)
+		{
+			return MoveTemp(Pixels); // already the right size: no resampling, full sharpness
+		}
 		TArray<FColor> Out;
 		Out.SetNumUninitialized(FrameSize.X * FrameSize.Y);
 		for (int32 Y = 0; Y < FrameSize.Y; ++Y)
@@ -104,12 +115,20 @@ void UVIPVideoStream::StartCapture()
 	// Grab at the window's own size: smaller buffers come back only partly drawn on Retina
 	// screens. EncodeAndSend scales the picture down to FrameSize.
 	const FIntPoint WindowSize = GameEngine->SceneViewport->GetSizeXY();
-	const FIntPoint GrabSize(FMath::Max(WindowSize.X, FrameSize.X), FMath::Max(WindowSize.Y, FrameSize.Y));
+	if (WindowSize.X <= 0 || WindowSize.Y <= 0)
+	{
+		return;
+	}
+	const FIntPoint GrabSize = WindowSize;
+	const int32 Width = FMath::Clamp(OptionOr(TEXT("VIPVideoWidth="), WindowSize.X), 160, WindowSize.X);
+	FrameSize = FIntPoint(Width, FMath::Max(90, Width * WindowSize.Y / WindowSize.X) & ~1);
+	JpegQuality = FMath::Clamp(OptionOr(TEXT("VIPVideoQuality="), 80), 30, 95);
+	FramesPerSecond = FMath::Clamp(OptionOr(TEXT("VIPVideoFps="), 15), 2, 30);
 	Grabber = MakeShared<FFrameGrabber>(GameEngine->SceneViewport.ToSharedRef(), GrabSize);
 	Grabber->StartCapturingFrames();
 	NextFrameAt = 0;
-	UE_LOG(LogVIPVideo, Display, TEXT("Streaming the patient: grabbing %dx%d, sending %dx%d at %.0f fps"),
-		GrabSize.X, GrabSize.Y, FrameSize.X, FrameSize.Y, FramesPerSecond);
+	UE_LOG(LogVIPVideo, Display, TEXT("Streaming the patient: grabbing %dx%d, sending %dx%d, JPEG %d, %d fps"),
+		GrabSize.X, GrabSize.Y, FrameSize.X, FrameSize.Y, JpegQuality, FramesPerSecond);
 }
 
 void UVIPVideoStream::StopCapture()
@@ -170,16 +189,18 @@ void UVIPVideoStream::EncodeAndSend(TArray<FColor>&& Pixels, FIntPoint Size)
 	TSharedRef<std::atomic<bool>> Busy = bEncoding;
 	TWeakObjectPtr<UWorld> WeakWorld(GetWorld());
 
-	Async(EAsyncExecution::ThreadPool, [Pixels = MoveTemp(Pixels), Size, Busy, WeakWorld]() mutable
+	const FIntPoint OutSize = FrameSize;
+	const int32 Quality = JpegQuality;
+	Async(EAsyncExecution::ThreadPool, [Pixels = MoveTemp(Pixels), Size, OutSize, Quality, Busy, WeakWorld]() mutable
 	{
-		const TArray<FColor> Small = ScaleDown(Pixels, Size);
+		const TArray<FColor> Small = ScaleDown(MoveTemp(Pixels), Size, OutSize);
 		IImageWrapperModule& Images = FModuleManager::LoadModuleChecked<IImageWrapperModule>(TEXT("ImageWrapper"));
 		const TSharedPtr<IImageWrapper> Jpeg = Images.CreateImageWrapper(EImageFormat::JPEG);
 		TArray64<uint8> Compressed;
 		// FColor is stored as B, G, R, A
-		if (Jpeg.IsValid() && Jpeg->SetRaw(Small.GetData(), Small.Num() * sizeof(FColor), FrameSize.X, FrameSize.Y, ERGBFormat::BGRA, 8))
+		if (Jpeg.IsValid() && Jpeg->SetRaw(Small.GetData(), Small.Num() * sizeof(FColor), OutSize.X, OutSize.Y, ERGBFormat::BGRA, 8))
 		{
-			Compressed = Jpeg->GetCompressed(JpegQuality);
+			Compressed = Jpeg->GetCompressed(Quality);
 		}
 		AsyncTask(ENamedThreads::GameThread, [Compressed = MoveTemp(Compressed), Busy, WeakWorld]()
 		{

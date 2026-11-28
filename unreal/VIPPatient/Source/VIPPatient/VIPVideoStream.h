@@ -41,6 +41,11 @@ private:
 
 	TSharedPtr<FFrameGrabber> Grabber;
 
+	// Set when the capture starts (window size and -VIPVideo* options)
+	FIntPoint FrameSize = FIntPoint(1280, 720);
+	int32 JpegQuality = 80;
+	int32 FramesPerSecond = 15;
+
 	int32 Viewers = 0;
 	double NextFrameAt = 0;
 

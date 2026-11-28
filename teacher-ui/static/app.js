@@ -281,8 +281,8 @@ function openVideo() {
 // -> picture -> back). While someone watches the video, this page plays the voice itself, delayed
 // by that trip, instead of letting the ElevenLabs SDK play it at once. ----
 const LIP_SYNC_KEY = 'vip-lipsync-ms';
-let lipSyncMs = 400;
-try { lipSyncMs = Number(localStorage.getItem(LIP_SYNC_KEY) ?? 400); } catch (error) { /* default */ }
+let lipSyncMs = 950;
+try { lipSyncMs = Number(localStorage.getItem(LIP_SYNC_KEY) ?? 950); } catch (error) { /* default */ }
 let lastFrameAt = -Infinity;
 let audioOut = null;      // AudioContext for the delayed voice
 let playHead = 0;         // when the next queued chunk starts (AudioContext time)
