@@ -27,6 +27,8 @@ def _no_engine_key(monkeypatch):
     # load_dotenv() may pick up a developer's .env (it never overrides an existing
     # variable), so pin an empty key: tests start without auth.
     monkeypatch.setenv("ENGINE_API_KEY", "")
+    # No real director calls in tests (tests that need one pass a fake).
+    monkeypatch.setenv("DIRECTOR", "off")
 
 
 class FakeCompletions:
@@ -42,10 +44,12 @@ class FakeCompletions:
         )
 
 
-def make_client(pieces=("Well... ", "it's my chest.")):
+def make_client(pieces=("Well... ", "it's my chest."), director=None):
     completions = FakeCompletions(list(pieces))
     fake = SimpleNamespace(chat=SimpleNamespace(completions=completions))
-    session = PatientSession(client_factory=lambda prompt: ChatActorClient(prompt, client=fake, model="test-model"))
+    session = PatientSession(
+        client_factory=lambda prompt: ChatActorClient(prompt, client=fake, model="test-model"), director=director,
+    )
     session.load(CASE)
     return TestClient(create_app(session, load_case=False)), completions
 
@@ -131,18 +135,24 @@ def test_stage_relays_audio_and_emotion_to_unreal():
             stage.send_text(json.dumps({"type": "audio", "pcm_b64": "AAABAA==", "audible": False}))
             assert json.loads(unreal.receive_text())["audible"] is False
             stage.send_text(json.dumps({"type": "emotion", "emotion": "furious", "intensity": 3}))
-            assert json.loads(unreal.receive_text()) == {"type": "emotion", "emotion": "neutral", "intensity": 1.0}
+            assert json.loads(unreal.receive_text()) == {"type": "emotion", "emotion": "neutral", "intensity": 2.0}
+            stage.send_text(json.dumps({"type": "emotion", "emotion": "confusion", "intensity": 0.5}))
+            assert json.loads(unreal.receive_text())["emotion"] == "confusion"
             stage.send_text(json.dumps({"type": "state", "state": "listening"}))
             assert json.loads(unreal.receive_text()) == {"type": "state", "state": "listening"}
-        # Loading a teacher case sends who the patient is, then the mood (case-001: neutral; set one inline).
+            stage.send_text(json.dumps({"type": "interrupt"}))
+            assert json.loads(unreal.receive_text()) == {"type": "interrupt"}
+        # Loading a teacher case sends who the patient is and how they look, then the mood.
         case = json.loads((ENGINE_DIR.parent / "cases" / "case-001.json").read_text(encoding="utf-8"))
         case["personality"]["mood"] = "sad"
+        case["presentation"] = {"pain": 4, "breathing": "fast_shallow", "visible_signs": ["pale", "sweaty"]}
         assert client.post("/case", json={"case": case}).json()["mood"] == "sad"
         look = json.loads(unreal.receive_text())
         assert look["type"] == "case"
         assert look["case"]["character_id"] == "man-01" and look["case"]["patient"]["age"] == 58
+        assert look["case"]["presentation"]["visible_signs"] == ["pale", "sweaty"]
         # Unreal gets the look only: never the diagnosis, the facts or the secrets
-        assert "diagnosis" not in look["case"] and "secrets" not in look["case"]
+        assert "diagnosis" not in look["case"] and "secrets" not in look["case"] and "symptoms" not in look["case"]
         assert "life_story" not in look["case"]["patient"]
         assert json.loads(unreal.receive_text())["emotion"] == "sad"
         # A student turn makes the patient think until the voice arrives
@@ -152,7 +162,45 @@ def test_stage_relays_audio_and_emotion_to_unreal():
     # A patient window that connects later still gets the loaded case first
     with client.websocket_connect("/ws/unreal") as late:
         assert json.loads(late.receive_text())["type"] == "case"
-        assert json.loads(late.receive_text())["type"] == "emotion"
+        assert json.loads(late.receive_text())["emotion"] == "sad"
+
+
+class FakeDirector:
+    def __init__(self):
+        self.calls = []
+
+    def direct(self, case, history):
+        self.calls.append((case, history))
+        return {"type": "emotion", "emotion": "fear", "intensity": 0.7, "pain": 5.0, "discomfort": 0.4}
+
+
+def test_director_sets_the_face_per_turn():
+    director = FakeDirector()
+    client, _ = make_client(director=director)
+    with client.websocket_connect("/ws/unreal") as unreal:
+        unreal.receive_text()  # starting emotion
+        unreal.receive_text()  # video viewers
+        client.post("/v1/chat/completions", json={"messages": history()})
+        assert json.loads(unreal.receive_text()) == {"type": "state", "state": "thinking"}
+        assert json.loads(unreal.receive_text()) == {
+            "type": "emotion", "emotion": "fear", "intensity": 0.7, "pain": 5.0, "discomfort": 0.4,
+        }
+    case, turns = director.calls[0]
+    assert case["case_id"] and turns[-1]["content"] == "Hello, what brings you in today?"
+
+
+def test_page_reported_turn_drives_the_face():
+    # The desktop app's agent calls OpenAI directly, so the page reports each student turn itself
+    director = FakeDirector()
+    client, completions = make_client(director=director)
+    with client.websocket_connect("/ws/unreal") as unreal:
+        unreal.receive_text()
+        unreal.receive_text()
+        assert client.post("/director", json={"messages": history()}).json()["director"] is True
+        assert json.loads(unreal.receive_text()) == {"type": "state", "state": "thinking"}
+        assert json.loads(unreal.receive_text())["emotion"] == "fear"
+    assert not completions.calls  # no patient reply is generated for it
+    assert client.post("/director", json={"messages": []}, headers={"cf-ray": "x"}).status_code == 403
 
 
 def test_websockets_closed_through_tunnel():

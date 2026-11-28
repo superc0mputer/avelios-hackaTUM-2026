@@ -10,19 +10,22 @@ const disclosureProfiles = {
   custom: 'Disclosure behavior is inferred from the custom description and selected mood.',
 };
 
+// Ages: how old each MetaHuman looks (unreal/VIPPatient/Scripts/patients.json). Unreal uses the
+// chosen face if the case age is within 15 years, otherwise the closest age of the same gender.
 const characters = [
-  { id: 'man-01', label: 'Man 01', gender: 'male' },
-  { id: 'man-02', label: 'Man 02', gender: 'male' },
-  { id: 'man-03', label: 'Man 03', gender: 'male' },
-  { id: 'woman-01', label: 'Woman 01', gender: 'female' },
-  { id: 'woman-02', label: 'Woman 02', gender: 'female' },
-  { id: 'woman-03', label: 'Woman 03', gender: 'female' },
+  { id: 'man-01', label: 'Man 01 · about 50', gender: 'male', age: 50 },
+  { id: 'man-02', label: 'Man 02 · about 72', gender: 'male', age: 72 },
+  { id: 'man-03', label: 'Man 03 · about 25', gender: 'male', age: 25 },
+  { id: 'woman-01', label: 'Woman 01 · about 58', gender: 'female', age: 58 },
+  { id: 'woman-02', label: 'Woman 02 · about 76', gender: 'female', age: 76 },
+  { id: 'woman-03', label: 'Woman 03 · about 28', gender: 'female', age: 28 },
 ];
 const categories = ['symptoms', 'medical_history', 'medications', 'allergies', 'family_history', 'lifestyle', 'secrets'];
-const stepTitles = ['Patient profile', 'Personality & mood', 'Clinical facts'];
+const stepTitles = ['Patient profile', 'Personality & mood', 'Condition', 'Clinical facts'];
 const stepHints = [
   'Start with the patient’s identity and diagnosis.',
   'Choose how the patient behaves and feels at the start.',
+  'Choose how the illness shows on the patient.',
   'Add the facts the patient can share during the interview.',
 ];
 let currentStep = 0;
@@ -247,8 +250,21 @@ function makeCase() {
       description: $('#personality-description').value.trim(),
       mood: $('#mood').value,
     },
+    presentation: makePresentation(),
     ...facts,
   };
+}
+
+// How the illness shows on the MetaHuman; empty fields are left out.
+function makePresentation() {
+  const presentation = {};
+  const pain = $('#pain').value.trim();
+  if (pain !== '') presentation.pain = Number(pain);
+  if ($('#breathing').value) presentation.breathing = $('#breathing').value;
+  if ($('#discomfort').value) presentation.discomfort = Number($('#discomfort').value);
+  const signs = [...document.querySelectorAll('#visible-signs input:checked')].map((box) => box.value);
+  if (signs.length) presentation.visible_signs = signs;
+  return presentation;
 }
 
 function showToast(message, error = false) {
@@ -660,16 +676,23 @@ $('#talk-button').addEventListener('click', async () => {
       // WebSocket mode delivers the patient's raw PCM in onAudio, which we relay to Unreal.
       connectionType: 'websocket',
       onAudio: (base64Audio) => sendToStage({ type: 'audio', sample_rate: PATIENT_AUDIO_RATE, pcm_b64: base64Audio }),
+      // The student talked over the patient: the MetaHuman stops speaking too
+      onInterruption: () => sendToStage({ type: 'interrupt' }),
       onConnect: () => setConversationState('listening', 'Listening'),
       onDisconnect: () => {
         conversation = null;
+        sendToStage({ type: 'state', state: 'idle' });
         if (stage) stage.close();
         setConversationState('idle', 'Not connected');
         $('#talk-button').hidden = false;
         $('#talk-button').disabled = false;
         $('#end-button').hidden = true;
       },
-      onModeChange: ({ mode }) => setConversationState(mode, mode === 'speaking' ? 'Patient is speaking' : 'Listening'),
+      onModeChange: ({ mode }) => {
+        setConversationState(mode, mode === 'speaking' ? 'Patient is speaking' : 'Listening');
+        // The MetaHuman looks attentive while the student talks (thinking comes from the voice server)
+        if (mode === 'listening') sendToStage({ type: 'state', state: 'listening' });
+      },
       onMessage: (payload) => {
         const role = payload.role || (payload.source === 'ai' ? 'agent' : 'user');
         addBubble(role, payload.message, role === 'agent' ? payload.response_id : null);

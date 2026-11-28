@@ -1,0 +1,93 @@
+{
+  "schema_version": "1.2",
+  "case_id": "case-101",
+  "case_pair_id": "acute-coronary-syndrome-nstemi-or-unstable-angina",
+  "character_id": "man-01",
+  "diagnosis": "Acute coronary syndrome (NSTEMI or unstable angina)",
+  "patient": {
+    "name": "Thomas Becker",
+    "age": 58,
+    "gender": "male",
+    "life_story": "Thomas has driven delivery lorries for a regional supermarket chain for twenty years. He is the one his colleagues call when something breaks, coaches his grandson's football team on Saturdays and hates fuss about himself. His wife Sabine made him come in today."
+  },
+  "personality": {
+    "type": "downplays_everything",
+    "mood": "fear",
+    "description": "Thomas plays the pain down and calls it indigestion, but he is frightened underneath and keeps rubbing his chest. He answers briefly and jokes to cover the fear; he opens up when the student takes the pain seriously and stays calm."
+  },
+  "presentation": {
+    "pain": 6,
+    "breathing": "fast_shallow",
+    "discomfort": 0,
+    "visible_signs": [
+      "pale",
+      "sweaty"
+    ]
+  },
+  "symptoms": [
+    "A heavy pressure in the middle of the chest started about an hour ago while he was sitting watching television; he thinks it is probably indigestion.",
+    "The pressure spreads into the left arm and up into the jaw. It has not eased since it started and is about six out of ten.",
+    "He has been sweating and feels sick with it, but has not vomited. He feels a little short of breath.",
+    "Changing position, pressing on the chest or breathing in deeply does not change the pain. He has not taken anything for it."
+  ],
+  "medical_history": [
+    "Type 2 diabetes diagnosed about five years ago.",
+    "High blood pressure for about eight years.",
+    "No previous heart attack, stent or heart operation."
+  ],
+  "medications": [
+    "Metformin twice a day for diabetes.",
+    "Ramipril for blood pressure (see secrets)."
+  ],
+  "allergies": [
+    "Penicillin: he had a rash as a child."
+  ],
+  "family_history": [
+    "His older brother had a stent put in at 55."
+  ],
+  "lifestyle": [
+    "Lives with his wife Sabine; two grown-up children.",
+    "Drinks a few beers at the weekend.",
+    "Smokes; says he is 'cutting down'."
+  ],
+  "secrets": [
+    "For about three weeks he has had a tightness in the chest when carrying crates at work; it came more often and with less effort each week, and he told nobody.",
+    "Stopped taking ramipril about two months ago because it gave him a dry cough; his doctor does not know.",
+    "Smokes about 15 cigarettes a day and has done for 35 years.",
+    "Drove himself here because he did not want an ambulance outside the house."
+  ],
+  "evaluation_fact_ids": {
+    "symptoms": [
+      "symptoms-001",
+      "symptoms-002",
+      "symptoms-003",
+      "symptoms-004"
+    ],
+    "medical_history": [
+      "medical_history-001",
+      "medical_history-002",
+      "medical_history-003"
+    ],
+    "medications": [
+      "medications-001",
+      "medications-002"
+    ],
+    "allergies": [
+      "allergies-001"
+    ],
+    "family_history": [
+      "family_history-001"
+    ],
+    "lifestyle": [
+      "lifestyle-001",
+      "lifestyle-002",
+      "lifestyle-003"
+    ],
+    "secrets": [
+      "secrets-001",
+      "secrets-002",
+      "secrets-003",
+      "secrets-004"
+    ]
+  }
+}

@@ -47,6 +47,10 @@
     "Often misses two or three atorvastatin doses in a week.",
     "Worries that reporting the symptoms could mean time off work or losing his usual duties."
   ],
+  "presentation": {
+    "pain": 0,
+    "breathing": "normal"
+  },
   "evaluation_fact_ids": {
     "symptoms": [
       "symptoms-001",

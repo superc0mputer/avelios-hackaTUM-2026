@@ -35,7 +35,30 @@
           "enum": ["no_preference", "downplays_everything", "anxious_talkative", "shy_reserved", "assertive", "distrustful", "custom"]
         },
         "description": { "type": "string" },
-        "mood": { "enum": ["neutral", "happy", "sad", "fear", "disgust", "anger", "surprise"] }
+        "mood": {
+          "enum": ["neutral", "happy", "sad", "fear", "disgust", "anger", "surprise",
+                   "boredom", "confidence", "confusion", "excitement", "playfulness"]
+        }
+      }
+    },
+    "presentation": {
+      "description": "Optional: how the illness shows in the MetaHuman. Pain and discomfort are the floor during the conversation.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "pain": { "type": "number", "minimum": 0, "maximum": 10 },
+        "breathing": {
+          "oneOf": [
+            { "enum": ["normal", "fast_shallow", "laboured", "slow_deep"] },
+            { "type": "number", "minimum": 4, "maximum": 60, "description": "breaths per minute" }
+          ]
+        },
+        "discomfort": { "type": "number", "minimum": 0, "maximum": 1 },
+        "visible_signs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "enum": ["pale", "jaundice", "cyanosis", "flushed", "sweaty", "red_eyes", "tired"] }
+        }
       }
     },
     "symptoms": { "$ref": "#/$defs/factsRequired" },

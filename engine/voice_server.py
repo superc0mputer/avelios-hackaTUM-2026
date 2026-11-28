@@ -19,6 +19,7 @@ Environment (engine/.env):
     PUBLIC_ACCESS_CODE  optional; if set, the teacher page (forwarded from TEACHER_UI_URL) and
                         the live patient video are reachable through the tunnel for anyone
                         who enters this code. Without it the tunnel serves ElevenLabs only.
+    DIRECTOR, DIRECTOR_MODEL  per-turn face direction, see director.py
 """
 
 from __future__ import annotations
@@ -26,7 +27,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
-import html
 import json
 import logging
 import os
@@ -46,6 +46,7 @@ import eleven_agent
 import key_check
 import keystore
 from case_adapter import load_patient_config
+from director import EMOTIONS, MAX_INTENSITY, Director
 from llm_client import DEFAULT_MODEL, ChatActorClient, LLMClientError
 from models import PatientConfig
 from prompt_builder import build_system_prompt
@@ -64,16 +65,15 @@ DEFAULT_CASE_PATH = ENGINE_DATA_DIR / "mock_gerhard_mueller.json"
 FALLBACK_REPLY = "Sorry... could you say that again?"
 # Requests that come through a Cloudflare tunnel carry these headers.
 TUNNEL_HEADERS = ("cf-connecting-ip", "cf-ray")
+# What the patient is doing in the conversation (Unreal's SetAttention, #37).
 ATTENTION_STATES = {"listening", "thinking", "idle"}
 # Routes ElevenLabs uses through the public tunnel (/v1/* also needs ENGINE_API_KEY).
 PUBLIC_PATHS = {"/v1/chat/completions", "/v1/models", "/health"}
 # Never through the tunnel, not even with the access code: the prompt holds the case's secrets.
-PRIVATE_PATHS = {"/prompt", "/cases", "/case"}
+PRIVATE_PATHS = {"/prompt", "/cases", "/case", "/director"}
 # The teacher page, forwarded for testers who come through the tunnel with the access code.
 TEACHER_UI_URL = os.getenv("TEACHER_UI_URL", "http://127.0.0.1:8765").rstrip("/")
 ACCESS_COOKIE = "vip_access"
-# Shared emotion names (README, Unreal's SetEmotion); unknown values become neutral.
-EMOTIONS = {"neutral", "happy", "sad", "fear", "disgust", "anger", "surprise"}
 
 
 def access_code() -> str:
@@ -124,12 +124,12 @@ class StageHub:
     """Relays the patient's voice and emotion from the browser to Unreal (the MetaHuman).
 
     * ``/ws/unreal``: Unreal connects here and receives JSON messages
-      ``{"type": "case", "case": {...}}`` (who the patient is: picks the face),
-      ``{"type": "emotion", "emotion": ..., "intensity": ...}``,
-      ``{"type": "audio", "sample_rate": 16000, "pcm_b64": ...}`` (mono 16-bit PCM),
-      ``{"type": "state", "state": "listening|thinking|idle"}``, ``{"type": "interrupt"}`` and
-      ``{"type": "viewers", "count": n}``. Unreal sends back binary JPEG frames of the patient
-      while ``count`` > 0; they go to every browser on ``/ws/video``.
+      ``{"type": "case", "case": {...}}`` (who the patient is and how they look, see ``case_look``),
+      ``{"type": "emotion", "emotion": ..., "intensity": 0-2, "pain": 0-10, "discomfort": 0-1}``
+      (pain and discomfort optional), ``{"type": "audio", "sample_rate": 16000, "pcm_b64": ...}``
+      (mono 16-bit PCM), ``{"type": "state", "state": "listening|thinking|idle"}``,
+      ``{"type": "interrupt"}`` and ``{"type": "viewers", "count": n}``. Unreal sends back binary
+      JPEG frames of the patient while ``count`` > 0; they go to every browser on ``/ws/video``.
     * ``/ws/stage``: the teacher page connects here while a conversation runs and sends
       the patient's audio chunks from the ElevenLabs SDK. It is told how many Unreal
       clients listen, so it can mute its own playback while the MetaHuman speaks.
@@ -138,7 +138,7 @@ class StageHub:
     def __init__(self) -> None:
         self.unreal: set[WebSocket] = set()
         self.stages: set[WebSocket] = set()
-        self.emotion = {"type": "emotion", "emotion": "neutral", "intensity": 0.6}
+        self.emotion: dict[str, Any] = {"type": "emotion", "emotion": "neutral", "intensity": 0.6}
         self.case: dict[str, Any] | None = None  # last case message, replayed when Unreal (re)connects
         self.viewers: set[VideoViewer] = set()
         self.frame: bytes | None = None  # newest JPEG of the patient from Unreal
@@ -168,8 +168,9 @@ class StageHub:
         # Unreal only captures video while somebody watches
         await self.to_unreal({"type": "viewers", "count": len(self.viewers)})
 
-    async def set_case(self, case: dict[str, Any] | None) -> None:
-        self.case = {"type": "case", "case": case} if case else None
+    async def set_case(self, look: dict[str, Any] | None) -> None:
+        self.case = {"type": "case", "case": look} if look else None
+        self.frame = None  # the old patient's picture must not be shown for the new case
         if self.case:
             await self.to_unreal(self.case)
 
@@ -177,23 +178,36 @@ class StageHub:
         if state in ATTENTION_STATES:
             await self.to_unreal({"type": "state", "state": state})
 
-    async def set_emotion(self, emotion: str, intensity: float = 0.6) -> None:
+    async def set_emotion(
+        self, emotion: str, intensity: float = 0.6, *, pain: float | None = None, discomfort: float | None = None,
+    ) -> None:
         emotion = emotion if emotion in EMOTIONS else "neutral"
-        self.emotion = {"type": "emotion", "emotion": emotion, "intensity": max(0.0, min(1.0, intensity))}
-        await self.to_unreal(self.emotion)
+        message: dict[str, Any] = {
+            "type": "emotion", "emotion": emotion, "intensity": max(0.0, min(MAX_INTENSITY, intensity)),
+        }
+        if pain is not None:
+            message["pain"] = max(0.0, min(10.0, pain))
+        if discomfort is not None:
+            message["discomfort"] = max(0.0, min(1.0, discomfort))
+        self.emotion = message
+        await self.to_unreal(message)
 
 
 class PatientSession:
     """The loaded case, its system prompt and the OpenAI client."""
 
-    def __init__(self, client_factory: Callable[[str], ChatActorClient] | None = None) -> None:
+    def __init__(
+        self, client_factory: Callable[[str], ChatActorClient] | None = None, director: Director | None = None,
+    ) -> None:
         self._client_factory = client_factory or (lambda prompt: ChatActorClient(prompt))
         self.case_path: Path | None = None
         self.source: Path | dict[str, Any] | None = None
         self.config: PatientConfig | None = None
         self.client: ChatActorClient | None = None
         self.mood = "neutral"
+        self.case_data: dict[str, Any] | None = None  # the full case, server side only (the director reads it)
         self.look: dict[str, Any] | None = None  # what Unreal needs to show this patient
+        self.director = director if director is not None else (Director() if Director.enabled() else None)
 
     def load(self, source: Path | dict[str, Any]) -> None:
         """Load a case (engine format or teacher-UI format) from a path or a dict."""
@@ -201,6 +215,7 @@ class PatientSession:
         data = source if isinstance(source, dict) else json.loads(Path(source).read_text(encoding="utf-8"))
         config = load_patient_config(data)
         self.mood = str((data.get("personality") or {}).get("mood") or "neutral")
+        self.case_data = data
         self.look = case_look(data)
         prompt = build_system_prompt(config)
         self.client = self._client_factory(prompt)
@@ -270,10 +285,28 @@ def _case_path_from_env() -> Path:
     return Path(raw) if raw else DEFAULT_CASE_PATH
 
 
+async def direct_face(session: PatientSession, hub: StageHub, history: list[dict[str, Any]]) -> None:
+    """Ask the director how the face reacts to this turn and send it to Unreal."""
+    if session.director is None:
+        return
+    t0 = time.perf_counter()
+    direction = await asyncio.to_thread(session.director.direct, session.case_data, history)
+    if direction is None:
+        return
+    await hub.set_emotion(
+        direction["emotion"], direction["intensity"], pain=direction["pain"], discomfort=direction["discomfort"],
+    )
+    log.info(
+        "face: %s %.2f pain=%.1f discomfort=%.2f (%.0fms)", direction["emotion"], direction["intensity"],
+        direction["pain"], direction["discomfort"], (time.perf_counter() - t0) * 1000,
+    )
+
+
 def create_app(session: PatientSession | None = None, *, load_case: bool = True) -> FastAPI:
     app = FastAPI(title="VIP voice server")
     app.state.session = session or PatientSession()
     app.state.stage = StageHub()
+    app.state.director_tasks = set()  # keeps running director calls referenced
     if load_case:
         try:
             app.state.session.load(_case_path_from_env())
@@ -286,6 +319,30 @@ def create_app(session: PatientSession | None = None, *, load_case: bool = True)
 
     def _is_local(request: Request) -> bool:
         return request.client is not None and request.client.host in ("127.0.0.1", "::1", "testclient")
+
+    def start_direction(history: list[dict[str, Any]]) -> None:
+        """Run the director next to the reply (never delaying it)."""
+        s: PatientSession = app.state.session
+        if s.director is None:
+            return
+        task = asyncio.create_task(direct_face(s, app.state.stage, history))
+        app.state.director_tasks.add(task)
+        task.add_done_callback(app.state.director_tasks.discard)
+
+    @app.post("/director")
+    async def director_route(request: Request) -> dict[str, Any]:
+        """The page reports a finished student turn: {"messages": [...]}. Local only.
+
+        Used when ElevenLabs talks to OpenAI directly (the desktop app), so /v1/chat/completions
+        never runs: the patient still thinks and the face still follows the conversation.
+        """
+        if not _is_local(request):
+            raise HTTPException(403, "local only")
+        body = await request.json()
+        history = [m for m in body.get("messages", []) if isinstance(m, dict)]
+        await app.state.stage.set_state("thinking")
+        start_direction(history)
+        return {"ok": True, "director": app.state.session.director is not None}
 
     def _key_status() -> dict[str, Any]:
         s: PatientSession = app.state.session
@@ -455,7 +512,7 @@ def create_app(session: PatientSession | None = None, *, load_case: bool = True)
         except Exception as exc:  # validation errors, bad JSON, LLM client setup
             raise HTTPException(422, f"could not load case: {exc}") from exc
         demo = s.config.demographics
-        # The MetaHuman switches to this patient's face and starts with the case's mood
+        # The MetaHuman switches to this patient's face and look, then starts with the case's mood
         await app.state.stage.set_case(s.look)
         await app.state.stage.set_emotion(s.mood)
         result = {
@@ -592,9 +649,11 @@ def create_app(session: PatientSession | None = None, *, load_case: bool = True)
         if s.client is None:
             raise HTTPException(503, "no case loaded")
         body = await request.json()
-        # The student has finished a turn: the patient thinks until the voice arrives
-        await app.state.stage.set_state("thinking")
         history = [m for m in body.get("messages", []) if isinstance(m, dict)]
+        # The student has finished a turn: the patient thinks until the voice arrives,
+        # and the director decides the face for the answer (next to the reply, never delaying it)
+        await app.state.stage.set_state("thinking")
+        start_direction(history)
         stream = bool(body.get("stream"))
         completion_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
         created = int(time.time())
