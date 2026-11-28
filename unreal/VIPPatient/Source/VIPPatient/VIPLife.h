@@ -23,6 +23,9 @@ struct FVIPLifeParams
 
 	/** 0 to 1: how often the eyes break contact with short glances aside. */
 	float GlanceRate = 0.3f;
+
+	/** Small nods per minute, for listening. */
+	float NodsPerMinute = 0;
 };
 
 /**
@@ -59,5 +62,7 @@ private:
 	double BlinkStart = -1;
 	bool bDoubleBlink = false;
 	FRotator Head = FRotator::ZeroRotator;       // smoothed head offset
+	double NextNod = 0;
+	double NodStart = -1;
 	float Phase[8] = {};
 };

@@ -12,9 +12,16 @@ namespace
 	constexpr float FixationJitter = 0.035f;
 	constexpr float GlanceSize = 0.28f;
 	constexpr float EyeSeconds = 0.025f; // saccades are fast
-	constexpr float GlanceHeadFollow = 6.0f; // degrees of head turn per unit of glance
+	constexpr float GlanceHeadFollow = 3.0f; // degrees of head turn per unit of glance
 
-	constexpr double HeadDegrees = 2.0;
+	// Head motion stays small: the face mesh turns its own neck, but the clothing follows the body,
+	// whose neck the face does not copy (CopyPoseFromMesh in ABP_MH_LiveLink seems inactive here).
+	// A few degrees already pull the neck out of the collar.
+	constexpr double HeadDegrees = 1.0;
+	constexpr double NodSeconds = 0.7;
+	// Downward (negative pitch) and small: more than about 1 degree of head pitch pulls the face mesh's
+	// neck away from the collar, since the clothing follows the body, not the face
+	constexpr float NodDegrees = -1.0f;
 	constexpr float HeadOffsetSeconds = 0.6f;
 
 	/** 0 to 1 and back: shuts quickly, opens a little slower, like a real blink. */
@@ -101,7 +108,39 @@ FRotator FVIPLife::Apply(TMap<FString, float>& Controls, double Now)
 	const FRotator Wanted3(P.HeadPitch + Eye.Y * GlanceHeadFollow * 0.5f, P.HeadYaw + Eye.X * GlanceHeadFollow, 0);
 	Head.Pitch = Approach(Head.Pitch, Wanted3.Pitch, Delta, HeadOffsetSeconds / Move);
 	Head.Yaw = Approach(Head.Yaw, Wanted3.Yaw, Delta, HeadOffsetSeconds / Move);
-	return Sway + Head;
+	// Listening nods: a small dip and back, sometimes twice
+	FRotator Nod = FRotator::ZeroRotator;
+	if (P.NodsPerMinute > 0)
+	{
+		if (NextNod == 0 || NextNod > Now + 60.0 / P.NodsPerMinute * 2)
+		{
+			NextNod = Now + Random.FRandRange(0.5f, 1.5f) * 60.0 / P.NodsPerMinute;
+		}
+		if (NodStart < 0 && Now >= NextNod)
+		{
+			NodStart = Now;
+		}
+	}
+	if (NodStart >= 0)
+	{
+		const double Progress = (Now - NodStart) / NodSeconds;
+		if (Progress >= 1.0)
+		{
+			NodStart = -1;
+			NextNod = P.NodsPerMinute > 0 ? Now + Random.FRandRange(0.5f, 1.5f) * 60.0 / P.NodsPerMinute : 0;
+		}
+		else
+		{
+			Nod.Pitch = NodDegrees * Move * FMath::Sin(Progress * PI) * (Progress < 0.5 ? 1.0f : 0.8f);
+		}
+	}
+	// Safety limits: beyond these the face mesh's neck clips through the collar (one-sided for yaw,
+	// see PreferredSide in VIPSpeechSubsystem.cpp)
+	FRotator Total = Sway + Head + Nod;
+	Total.Yaw = FMath::Clamp(Total.Yaw, -1.2, 6.0);
+	Total.Pitch = FMath::Clamp(Total.Pitch, -1.2, 1.2);
+	Total.Roll = FMath::Clamp(Total.Roll, -1.0, 1.0);
+	return Total;
 }
 
 void FVIPLife::UpdateEyes(double Now, const FVIPLifeParams& P)

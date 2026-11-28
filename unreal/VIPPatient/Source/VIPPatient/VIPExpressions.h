@@ -19,6 +19,13 @@ namespace VIPExpressions
 
 	/** Adds the controls for Emotion, scaled by Weight, to Out (control name to value). */
 	void Add(const FString& Emotion, float Weight, TMap<FString, float>& Out);
+
+	/**
+	 * Adds a pain face (#35), from the Prkachin-Solomon Pain Intensity action units: brow lowering
+	 * (AU4), orbital tightening (AU6, AU7), levator contraction (AU9, AU10) and eye closure (AU43).
+	 * Weight 1 is the strongest pain.
+	 */
+	void AddPain(float Weight, TMap<FString, float>& Out);
 }
 
 /** Expression offsets handed from the game thread to the pipeline thread. */

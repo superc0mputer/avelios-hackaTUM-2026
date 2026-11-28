@@ -21,6 +21,12 @@ void FVIPSpeechQueue::Add(const TArray<float>& Samples)
 	Pending.Append(Samples);
 }
 
+void FVIPSpeechQueue::Clear()
+{
+	FScopeLock Lock(&Mutex);
+	Pending.Reset();
+}
+
 void FVIPSpeechQueue::Take(TArray<float>& Out, int32 Count)
 {
 	Out.SetNumZeroed(Count);
@@ -102,7 +108,9 @@ void FVIPSpeechSubject::ExtractPipelineData(TSharedPtr<UE::MetaHuman::Pipeline::
 	}
 
 	// Eyes, blinks, small face movement and head sway, so the patient never stares
-	const FRotator Sway = Life->Apply(Animation.AnimationData, FPlatformTime::Seconds());
+	static const bool bNoHead = FParse::Param(FCommandLine::Get(), TEXT("VIPNoHead")); // testing: face rig head stays still
+	const FRotator Sway = bNoHead ? (Life->Apply(Animation.AnimationData, FPlatformTime::Seconds()), FRotator::ZeroRotator)
+		: Life->Apply(Animation.AnimationData, FPlatformTime::Seconds());
 
 	// The audio solver leaves the pose all zero, which means "no head data"; start from rest then
 	const bool bHasPose = Animation.Pose.GetRotation().SizeSquared() > 0.5;
