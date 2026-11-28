@@ -128,11 +128,27 @@ def test_stage_relays_audio_and_emotion_to_unreal():
             assert json.loads(unreal.receive_text()) == {"type": "audio", "sample_rate": 16000, "pcm_b64": "AAABAA=="}
             stage.send_text(json.dumps({"type": "emotion", "emotion": "furious", "intensity": 3}))
             assert json.loads(unreal.receive_text()) == {"type": "emotion", "emotion": "neutral", "intensity": 1.0}
-        # Loading a teacher case sends its mood (case-001: neutral; set a different one inline).
+            stage.send_text(json.dumps({"type": "state", "state": "listening"}))
+            assert json.loads(unreal.receive_text()) == {"type": "state", "state": "listening"}
+        # Loading a teacher case sends who the patient is, then the mood (case-001: neutral; set one inline).
         case = json.loads((ENGINE_DIR.parent / "cases" / "case-001.json").read_text(encoding="utf-8"))
         case["personality"]["mood"] = "sad"
         assert client.post("/case", json={"case": case}).json()["mood"] == "sad"
+        look = json.loads(unreal.receive_text())
+        assert look["type"] == "case"
+        assert look["case"]["character_id"] == "man-01" and look["case"]["patient"]["age"] == 58
+        # Unreal gets the look only: never the diagnosis, the facts or the secrets
+        assert "diagnosis" not in look["case"] and "secrets" not in look["case"]
+        assert "life_story" not in look["case"]["patient"]
         assert json.loads(unreal.receive_text())["emotion"] == "sad"
+        # A student turn makes the patient think until the voice arrives
+        client.post("/v1/chat/completions", json={"messages": history()})
+        assert json.loads(unreal.receive_text()) == {"type": "state", "state": "thinking"}
+
+    # A patient window that connects later still gets the loaded case first
+    with client.websocket_connect("/ws/unreal") as late:
+        assert json.loads(late.receive_text())["type"] == "case"
+        assert json.loads(late.receive_text())["type"] == "emotion"
 
 
 def test_websockets_closed_through_tunnel():

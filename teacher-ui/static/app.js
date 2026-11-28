@@ -345,7 +345,11 @@ $('#talk-button').addEventListener('click', async () => {
         $('#talk-button').disabled = false;
         $('#end-button').hidden = true;
       },
-      onModeChange: ({ mode }) => setConversationState(mode, mode === 'speaking' ? 'Patient is speaking' : 'Listening'),
+      onModeChange: ({ mode }) => {
+        setConversationState(mode, mode === 'speaking' ? 'Patient is speaking' : 'Listening');
+        // The MetaHuman looks attentive while the student talks
+        if (mode === 'listening') sendToStage({ type: 'state', state: 'listening' });
+      },
       onMessage: (payload) => {
         const role = payload.role || (payload.source === 'ai' ? 'agent' : 'user');
         addBubble(role, payload.message, role === 'agent' ? payload.response_id : null);

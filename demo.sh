@@ -42,6 +42,22 @@ for name in OPENAI_API_KEY ENGINE_API_KEY ELEVENLABS_API_KEY ELEVENLABS_AGENT_ID
   [ -n "$(env_value "$name")" ] || die "$name is not set in engine/.env"
 done
 
+# --- MetaHumans built? (building them takes long and needs an Epic sign-in) ----------
+if [ "$unreal" = 1 ]; then
+  content="$root/unreal/VIPPatient/Content"
+  # Same files unreal/build.sh checks for each patient in patients.json
+  presets="$(python3 -c 'import json, sys; print(" ".join(p["preset"] for p in json.load(open(sys.argv[1]))["patients"]))' \
+    "$root/unreal/VIPPatient/Scripts/patients.json")" || die "cannot read unreal/VIPPatient/Scripts/patients.json"
+  missing=""
+  for preset in $presets; do
+    [ -f "$content/Patient/Characters/MHC_$preset.uasset" ] \
+      && [ -f "$content/MetaHumans/MHC_$preset/Face/SKM_MHC_${preset}_FaceMesh.uasset" ] || missing="$missing $preset"
+  done
+  [ -z "$missing" ] || die "these MetaHumans are not built yet:$missing.
+  Build them once from a Terminal on this Mac: unreal/build.sh  (about 10 minutes per patient;
+  Epic may ask you to sign in). Or start without the MetaHuman: ./demo.sh --no-unreal"
+fi
+
 # --- ports ------------------------------------------------------------------------
 port_free() { ! (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
 for port in "$VOICE_PORT" "$PAGE_PORT"; do

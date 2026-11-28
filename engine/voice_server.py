@@ -49,6 +49,7 @@ FALLBACK_REPLY = "Sorry... could you say that again?"
 # Requests that come through a Cloudflare tunnel carry these headers.
 TUNNEL_HEADERS = ("cf-connecting-ip", "cf-ray")
 # Routes reachable through the public tunnel (everything else is local/tailnet only).
+ATTENTION_STATES = {"listening", "thinking", "idle"}
 PUBLIC_PATHS = {"/v1/chat/completions", "/v1/models", "/health"}
 # Shared emotion names (README, Unreal's SetEmotion); unknown values become neutral.
 EMOTIONS = {"neutral", "happy", "sad", "fear", "disgust", "anger", "surprise"}
@@ -58,8 +59,10 @@ class StageHub:
     """Relays the patient's voice and emotion from the browser to Unreal (the MetaHuman).
 
     * ``/ws/unreal``: Unreal connects here and receives JSON messages
-      ``{"type": "emotion", "emotion": ..., "intensity": ...}`` and
-      ``{"type": "audio", "sample_rate": 16000, "pcm_b64": ...}`` (mono 16-bit PCM).
+      ``{"type": "case", "case": {...}}`` (who the patient is: picks the face),
+      ``{"type": "emotion", "emotion": ..., "intensity": ...}``,
+      ``{"type": "audio", "sample_rate": 16000, "pcm_b64": ...}`` (mono 16-bit PCM),
+      ``{"type": "state", "state": "listening|thinking|idle"}`` and ``{"type": "interrupt"}``.
     * ``/ws/stage``: the teacher page connects here while a conversation runs and sends
       the patient's audio chunks from the ElevenLabs SDK. It is told how many Unreal
       clients listen, so it can mute its own playback while the MetaHuman speaks.
@@ -69,6 +72,7 @@ class StageHub:
         self.unreal: set[WebSocket] = set()
         self.stages: set[WebSocket] = set()
         self.emotion = {"type": "emotion", "emotion": "neutral", "intensity": 0.6}
+        self.case: dict[str, Any] | None = None  # last case message, replayed when Unreal (re)connects
 
     async def to_unreal(self, message: dict[str, Any]) -> None:
         text = json.dumps(message)
@@ -86,6 +90,15 @@ class StageHub:
             except Exception:
                 self.stages.discard(ws)
 
+    async def set_case(self, case: dict[str, Any] | None) -> None:
+        self.case = {"type": "case", "case": case} if case else None
+        if self.case:
+            await self.to_unreal(self.case)
+
+    async def set_state(self, state: str) -> None:
+        if state in ATTENTION_STATES:
+            await self.to_unreal({"type": "state", "state": state})
+
     async def set_emotion(self, emotion: str, intensity: float = 0.6) -> None:
         emotion = emotion if emotion in EMOTIONS else "neutral"
         self.emotion = {"type": "emotion", "emotion": emotion, "intensity": max(0.0, min(1.0, intensity))}
@@ -101,17 +114,39 @@ class PatientSession:
         self.config: PatientConfig | None = None
         self.client: ChatActorClient | None = None
         self.mood = "neutral"
+        self.look: dict[str, Any] | None = None  # what Unreal needs to show this patient
 
     def load(self, source: Path | dict[str, Any]) -> None:
         """Load a case (engine format or teacher-UI format) from a path or a dict."""
         data = source if isinstance(source, dict) else json.loads(Path(source).read_text(encoding="utf-8"))
         config = load_patient_config(data)
         self.mood = str((data.get("personality") or {}).get("mood") or "neutral")
+        self.look = case_look(data)
         prompt = build_system_prompt(config)
         self.client = self._client_factory(prompt)
         self.config = config
         self.case_path = source if isinstance(source, Path) else None
         log.info("loaded case %s (%s) with model %s", config.case_id, config.demographics.full_name, self.client.model)
+
+
+def case_look(data: dict[str, Any]) -> dict[str, Any] | None:
+    """The part of a teacher case that Unreal uses to show the patient (VIPCase.cpp).
+
+    Only appearance and behaviour: the diagnosis, the facts and the secrets stay here.
+    Engine-format cases have no look, so Unreal keeps its default patient.
+    """
+    if "schema_version" not in data:
+        return None
+    patient = data.get("patient") or {}
+    look: dict[str, Any] = {
+        "case_id": data.get("case_id"),
+        "character_id": data.get("character_id"),
+        "patient": {k: patient[k] for k in ("name", "age", "gender") if k in patient},
+        "personality": {k: v for k, v in (data.get("personality") or {}).items() if k in ("type", "mood")},
+    }
+    if isinstance(data.get("presentation"), dict):
+        look["presentation"] = data["presentation"]
+    return look
 
 
 def list_cases() -> list[dict[str, Any]]:
@@ -210,7 +245,8 @@ def create_app(session: PatientSession | None = None, *, load_case: bool = True)
         except Exception as exc:  # validation errors, bad JSON, LLM client setup
             raise HTTPException(422, f"could not load case: {exc}") from exc
         demo = s.config.demographics
-        # The MetaHuman starts with the case's mood (per-reply emotion comes later).
+        # The MetaHuman switches to this patient's face and starts with the case's mood
+        await app.state.stage.set_case(s.look)
         await app.state.stage.set_emotion(s.mood)
         return {
             "case_id": s.config.case_id, "name": demo.full_name, "age": demo.age, "mood": s.mood,
@@ -230,6 +266,8 @@ def create_app(session: PatientSession | None = None, *, load_case: bool = True)
         await ws.accept()
         hub.unreal.add(ws)
         log.info("unreal connected (%d)", len(hub.unreal))
+        if hub.case:
+            await ws.send_text(json.dumps(hub.case))
         await ws.send_text(json.dumps(hub.emotion))
         await hub.status()
         try:
@@ -266,6 +304,8 @@ def create_app(session: PatientSession | None = None, *, load_case: bool = True)
                     await hub.set_emotion(str(message.get("emotion", "neutral")), float(message.get("intensity", 0.6)))
                 elif kind == "interrupt":
                     await hub.to_unreal({"type": "interrupt"})
+                elif kind == "state":
+                    await hub.set_state(str(message.get("state", "")))
         except (WebSocketDisconnect, ValueError, json.JSONDecodeError):
             pass
         finally:
@@ -288,6 +328,8 @@ def create_app(session: PatientSession | None = None, *, load_case: bool = True)
         if s.client is None:
             raise HTTPException(503, "no case loaded")
         body = await request.json()
+        # The student has finished a turn: the patient thinks until the voice arrives
+        await app.state.stage.set_state("thinking")
         history = [m for m in body.get("messages", []) if isinstance(m, dict)]
         stream = bool(body.get("stream"))
         completion_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
