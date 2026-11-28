@@ -93,12 +93,19 @@ if (Test-Path $redist) {
     Write-Host "note: vc_redist.x64.exe not found (set `$env:UE_ROOT); PCs without the C++ runtime will need it"
 }
 
-# --- how to start it
-Set-Content -Encoding ascii (Join-Path $out "Start VIP Patient.cmd") @"
-@echo off
-title VIP Patient
-"%~dp0runtime\python\python.exe" "%~dp0app\launcher.py" %*
-"@
+# --- how to start it: one .exe, built with the C# compiler that comes with Windows
+Say "building Start VIP Patient.exe"
+$csc = Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+if (-not (Test-Path $csc)) { Fail "C# compiler not found at $csc (.NET Framework 4 is part of Windows 10 and 11)" }
+# Same icon as the patient window
+Add-Type -AssemblyName System.Drawing
+$icon = Join-Path $cache "VIPPatient.ico"
+$iconStream = [System.IO.File]::Create($icon)
+[System.Drawing.Icon]::ExtractAssociatedIcon((Join-Path $out "Patient\VIPPatient.exe")).Save($iconStream)
+$iconStream.Close()
+& $csc /nologo /optimize /target:exe "/win32icon:$icon" "/out:$(Join-Path $out 'Start VIP Patient.exe')" `
+    (Join-Path $PSScriptRoot "StartVIPPatient.cs")
+if ($LASTEXITCODE) { Fail "building Start VIP Patient.exe failed" }
 Copy-Item (Join-Path $PSScriptRoot "README.txt") $out
 
 # Check that the bundled Python finds everything before shipping it (without starting a server)

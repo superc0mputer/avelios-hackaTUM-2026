@@ -6,7 +6,7 @@ with a voice and a face, and reveals facts only when you ask the right questions
 
 START
   1. Unzip this folder anywhere (a short path such as C:\VIP is best).
-  2. Double-click "Start VIP Patient.cmd".
+  2. Double-click "Start VIP Patient.exe".
      Windows may warn that the app is from an unknown publisher: More info > Run anyway.
   3. The patient window and a page in your browser open. On first start the page asks for
      your own OpenAI and ElevenLabs API keys (see below). Then pick a patient, click

@@ -1,12 +1,14 @@
 """Starts the whole VIP patient app on one Windows computer.
 
-Run by "Start VIP Patient.cmd" with the bundled Python. Starts the voice server (patient
-engine) and the page on this computer only, opens the patient window (packaged Unreal app)
-and the page in the browser. On first start the page asks for the user's own OpenAI and
-ElevenLabs keys. Closing this console window stops everything.
+Run by "Start VIP Patient.exe" (app/StartVIPPatient.cs) with the bundled Python. Starts the voice server (patient
+engine) and the page on this computer only, then fills the screen with the patient window
+(packaged Unreal app) on the left and the page as an app window (Edge or Chrome) on the right.
+On first start the page asks for the user's own OpenAI and ElevenLabs keys. Closing this
+console window stops everything, the page window included.
 
     launcher.py               everything
     launcher.py --no-unreal   without the patient window (the voice plays in the browser)
+    launcher.py --tab         the page in a normal tab of the default browser instead
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ import os
 import socket
 import subprocess
 import sys
+import threading
 import time
 import urllib.request
 import webbrowser
@@ -122,6 +125,104 @@ def stop_children_with_this_window() -> None:
     globals()["_JOB"] = job
 
 
+PATIENT_SHARE = 0.6  # of the screen width; the page gets the rest, on the right
+# Chrome first: Edge signs a new profile into the Windows account and shows a sync dialog
+BROWSERS = [
+    Path(os.getenv("ProgramFiles", "")) / "Google/Chrome/Application/chrome.exe",
+    Path(os.getenv("LOCALAPPDATA", "")) / "Google/Chrome/Application/chrome.exe",
+    Path(os.getenv("ProgramFiles(x86)", "")) / "Microsoft/Edge/Application/msedge.exe",
+    Path(os.getenv("ProgramFiles", "")) / "Microsoft/Edge/Application/msedge.exe",
+]
+
+
+def screen_halves() -> tuple[tuple[int, int, int, int], tuple[int, int, int, int]]:
+    """(x, y, width, height) for the patient and for the page, in physical pixels,
+    filling the main screen's work area (everything but the taskbar)."""
+    import ctypes
+    from ctypes import wintypes
+
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)  # real pixels, not scaled ones
+    except Exception:  # noqa: BLE001 - older Windows
+        ctypes.windll.user32.SetProcessDPIAware()
+    area = wintypes.RECT()
+    ctypes.windll.user32.SystemParametersInfoW(0x30, 0, ctypes.byref(area), 0)  # SPI_GETWORKAREA
+    width, height = area.right - area.left, area.bottom - area.top
+    split = int(width * PATIENT_SHARE)
+    return (area.left, area.top, split, height), (area.left + split, area.top, width - split, height)
+
+
+def place_window(pid: int, rect: tuple[int, int, int, int], seconds: float) -> bool:
+    """Wait for the first visible top-level window of process `pid` and move it to `rect`,
+    so that its visible edge (without Windows' invisible resize border) lands exactly there."""
+    import ctypes
+    from ctypes import wintypes
+
+    user32, dwm = ctypes.windll.user32, ctypes.windll.dwmapi
+    found: list[int] = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def visit(hwnd, _):
+        owner = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+        if owner.value == pid and user32.IsWindowVisible(hwnd) and not user32.GetWindow(hwnd, 4):  # GW_OWNER
+            found.append(hwnd)
+            return False
+        return True
+
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        found.clear()
+        user32.EnumWindows(visit, 0)
+        if found:
+            break
+        time.sleep(0.5)
+    else:
+        return False
+    hwnd = found[0]
+    time.sleep(1)  # let the app finish creating its window before moving it
+    user32.ShowWindow(hwnd, 9)  # SW_RESTORE, in case it opened maximized
+    x, y, w, h = rect
+    user32.SetWindowPos(hwnd, 0, x, y, w, h, 0x0004 | 0x0010)  # NOZORDER | NOACTIVATE
+    outer, visible = wintypes.RECT(), wintypes.RECT()
+    user32.GetWindowRect(hwnd, ctypes.byref(outer))
+    if dwm.DwmGetWindowAttribute(hwnd, 9, ctypes.byref(visible), ctypes.sizeof(visible)) == 0:  # EXTENDED_FRAME_BOUNDS
+        left, top = visible.left - outer.left, visible.top - outer.top
+        right, bottom = outer.right - visible.right, outer.bottom - visible.bottom
+        user32.SetWindowPos(hwnd, 0, x - left, y - top, w + left + right, h + top + bottom, 0x0004 | 0x0010)
+    return True
+
+
+def open_page_window(url: str, rect: tuple[int, int, int, int]) -> subprocess.Popen | None:
+    """Open the page as its own app window (no tabs, no address bar) in Chrome or Edge, with a
+    profile of its own so it is a new window we can place. The browser asks for the microphone
+    once; the profile remembers the answer."""
+    browser = next((b for b in BROWSERS if b.is_file()), None)
+    if browser is None:
+        return None
+    x, y, w, h = rect
+    profile = LOGS.parent / "browser"
+    turn_off_translate(profile / "Default" / "Preferences")
+    return subprocess.Popen([
+        str(browser), f"--app={url}", f"--user-data-dir={profile}",
+        f"--window-position={x},{y}", f"--window-size={w},{h}", "--lang=en-US",
+        "--no-first-run", "--no-default-browser-check", "--disable-features=msImplicitSignin",
+    ])
+
+
+def turn_off_translate(preferences: Path) -> None:
+    """The page is English; on a German PC the browser would offer to translate it every time."""
+    import json
+
+    try:
+        prefs = json.loads(preferences.read_text(encoding="utf-8")) if preferences.exists() else {}
+        prefs.setdefault("translate", {})["enabled"] = False
+        preferences.parent.mkdir(parents=True, exist_ok=True)
+        preferences.write_text(json.dumps(prefs), encoding="utf-8")
+    except (OSError, ValueError):
+        pass  # only cosmetic
+
+
 def open_browser(url: str) -> None:
     """Open the page outside the job, so closing this window does not close the user's browser."""
     try:
@@ -152,19 +253,29 @@ def main() -> None:
         if not wait_for(f"http://127.0.0.1:{VOICE_PORT}/health", 60) or not wait_for(PAGE_URL, 30):
             fail(f"the patient engine did not start. Logs: {LOGS}")
 
-        if with_unreal:
-            if PATIENT_EXE.exists():
-                ensure_vc_runtime()
-                say("opening the patient window (the first start can take a minute)")
-                children.append(subprocess.Popen([
-                    str(PATIENT_EXE), "-windowed", "-resx=1280", "-resy=720",
-                    f"-VIPServer=ws://127.0.0.1:{VOICE_PORT}/ws/unreal",
-                ]))
-            else:
-                say("no patient window in this download; the voice plays in the browser")
+        patient_rect, page_rect = screen_halves()
+        if with_unreal and not PATIENT_EXE.exists():
+            say("no patient window in this download; the voice plays in the browser")
+        if with_unreal and PATIENT_EXE.exists():
+            ensure_vc_runtime()
+            say("opening the patient window on the left (the first start can take a minute)")
+            x, y, w, h = patient_rect
+            patient = subprocess.Popen([
+                str(PATIENT_EXE), "-windowed", f"-WinX={x}", f"-WinY={y}", f"-ResX={w}", f"-ResY={h}",
+                f"-VIPServer=ws://127.0.0.1:{VOICE_PORT}/ws/unreal",
+            ])
+            children.append(patient)
+            threading.Thread(target=place_window, args=(patient.pid, patient_rect, 180), daemon=True).start()
+        else:
+            page_rect = (patient_rect[0], patient_rect[1], patient_rect[2] + page_rect[2], page_rect[3])
 
-        say(f"opening {PAGE_URL} in your browser")
-        open_browser(PAGE_URL)
+        say("opening the page on the right")
+        page_window = None if "--tab" in sys.argv else open_page_window(PAGE_URL, page_rect)
+        if page_window is None:
+            say(f"opening {PAGE_URL} in your browser")
+            open_browser(PAGE_URL)
+        else:
+            threading.Thread(target=place_window, args=(page_window.pid, page_rect, 30), daemon=True).start()
         print(f"\nThe app is running. Keep this window open; close it to stop everything.\nLogs: {LOGS}\n", flush=True)
         while all(child.poll() is None for child in children[:2]):
             time.sleep(1)
