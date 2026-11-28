@@ -1,8 +1,11 @@
 """Stage 2: assemble the character into a Blueprint."""
+import os
 import unreal
 
-CHAR = "/Game/Patient/MHC_Patient"
-BLUEPRINT = "/Game/MetaHumans/MHC_Patient/BP_MHC_Patient"
+# build.sh runs this once per patient in patients.json
+NAME = "MHC_" + os.environ.get("VIP_PRESET", "Walter")
+CHAR = "/Game/Patient/Characters/" + NAME
+BLUEPRINT = "/Game/MetaHumans/%s/BP_%s" % (NAME, NAME)
 
 
 def log(message):
@@ -35,8 +38,8 @@ finally:
 lib.save_directory("/Game", only_if_is_dirty=True, recursive=True)
 # A failed assembly can still leave an empty Blueprint, so check the meshes too
 for asset in (BLUEPRINT,
-              "/Game/MetaHumans/MHC_Patient/Face/SKM_MHC_Patient_FaceMesh",
-              "/Game/MetaHumans/MHC_Patient/Body/SKM_MHC_Patient_BodyMesh"):
+              "/Game/MetaHumans/%s/Face/SKM_%s_FaceMesh" % (NAME, NAME),
+              "/Game/MetaHumans/%s/Body/SKM_%s_BodyMesh" % (NAME, NAME)):
     if not lib.does_asset_exist(asset):
         raise RuntimeError("assembly is incomplete, missing " + asset)
 log("STAGE OK")

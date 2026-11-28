@@ -1,0 +1,11 @@
+{
+  "_comment": "Patients the app can show. preset: Epic MetaHuman preset. age: how old the face looks (estimated from renders), used to pick the closest patient for a case. Keep the list short: each patient adds about 0.5 GB to the app.",
+  "patients": [
+    {"preset": "Walter", "gender": "male", "age": 72, "default": true},
+    {"preset": "Bruce", "gender": "male", "age": 50},
+    {"preset": "Trey", "gender": "male", "age": 25},
+    {"preset": "Grace", "gender": "female", "age": 76},
+    {"preset": "Lani", "gender": "female", "age": 58},
+    {"preset": "Sunita", "gender": "female", "age": 28}
+  ]
+}

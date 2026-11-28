@@ -4,7 +4,7 @@
 #   unreal/build.sh --clean    delete the generated content and rebuild
 #   unreal/build.sh --run      build if needed, then open the patient window
 #   unreal/package.sh          standalone app for people without Unreal
-# Options: UE_ROOT=<engine folder>  VIP_PRESET=<Epic preset name>
+# Patients: unreal/VIPPatient/Scripts/patients.json. Option: UE_ROOT=<engine folder>
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -13,7 +13,6 @@ project="$project_dir/VIPPatient.uproject"
 content="$project_dir/Content"
 logs="$project_dir/Saved/BuildLogs"
 UE_ROOT="${UE_ROOT:-/Users/Shared/Epic Games/UE_5.8}"
-export VIP_PRESET="${VIP_PRESET:-Walter}"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
@@ -34,7 +33,11 @@ case "$(uname -s)" in
 esac
 [ -x "$editor" ] || die "Unreal Engine 5.8 not found at '$UE_ROOT' (set UE_ROOT)."
 presets="$UE_ROOT/Engine/Plugins/MetaHuman/MetaHumanCharacter/Content/Optional/Presets"
-[ -f "$presets/$VIP_PRESET.uasset" ] || die "preset '$VIP_PRESET' not found. Install 'MetaHuman Creator Core Data' via Epic Games Launcher > 5.8 > Options."
+patients=$(python3 -c 'import json,sys; print(" ".join(p["preset"] for p in json.load(open(sys.argv[1]))["patients"]))' \
+  "$project_dir/Scripts/patients.json") || die "cannot read Scripts/patients.json"
+for preset in $patients; do
+  [ -f "$presets/$preset.uasset" ] || die "preset '$preset' not found. Install 'MetaHuman Creator Core Data' via Epic Games Launcher > 5.8 > Options."
+done
 [[ "$project" != *" "* ]] || die "move the repository to a path without spaces."
 
 # Unreal limits file paths to 260 characters; the deepest generated asset needs about 120
@@ -43,10 +46,10 @@ presets="$UE_ROOT/Engine/Plugins/MetaHuman/MetaHumanCharacter/Content/Optional/P
 [ "$clean" = 1 ] && rm -rf "$content/Patient" "$content/MetaHumans"
 mkdir -p "$logs"
 
-stage() {  # stage <script name> <file it must produce>
-  local name="$1" output="$2" log="$logs/$1.log"
-  if [ -f "$output" ]; then echo "== $name: already built"; return; fi
-  echo "== $name: running (several minutes), log: $log"
+stage() {  # stage <script name> <file it must produce> [log name]
+  local name="$1" output="$2" log="$logs/${3:-$1}.log"
+  if [ -f "$output" ]; then echo "== ${3:-$1}: already built"; return; fi
+  echo "== ${3:-$1}: running (several minutes), log: $log"
   "$editor" "$project" -ExecutePythonScript="$project_dir/Scripts/$name.py" \
     -nosplash -unattended -stdout -FullStdOutLogOutput > "$log" 2>&1 || true
   # the editor exits 0 even when a script fails, so check the marker
@@ -62,8 +65,13 @@ echo "== compiling the C++ module (Source/VIPPatient)"
 "$UE_ROOT/Engine/Build/BatchFiles/Mac/Build.sh" VIPPatientEditor Mac Development -project="$project" -waitmutex \
   > "$logs/compile.log" 2>&1 || die "compile failed, see $logs/compile.log"
 
-stage build_character "$content/Patient/MHC_Patient.uasset"
-stage assemble "$content/MetaHumans/MHC_Patient/Face/SKM_MHC_Patient_FaceMesh.uasset"
+for preset in $patients; do
+  export VIP_PRESET="$preset"
+  stage build_character "$content/Patient/Characters/MHC_$preset.uasset" "build_character_$preset"
+  stage assemble "$content/MetaHumans/MHC_$preset/Face/SKM_MHC_${preset}_FaceMesh.uasset" "assemble_$preset"
+done
+# the room and patient table list every patient, so rebuild them when patients.json changes
+[ "$project_dir/Scripts/patients.json" -nt "$content/Patient/ConsultationRoom.umap" ] && rm -f "$content/Patient/ConsultationRoom.umap"
 stage build_scene "$content/Patient/ConsultationRoom.umap"
 
 echo "Patient ready."

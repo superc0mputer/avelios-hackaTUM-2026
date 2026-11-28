@@ -1,5 +1,6 @@
 #include "VIPSpeechSubsystem.h"
 
+#include "VIPPatients.h"
 #include "VIPSpeechSource.h"
 
 #include "Animation/AnimInstance.h"
@@ -98,6 +99,13 @@ void UVIPSpeechSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	}
 
 	StartSource(VoiceSampleRate);
+
+	// Which patient: from the case later (#24); for now from the command line
+	FString Gender;
+	int32 Age = -1;
+	FParse::Value(FCommandLine::Get(), TEXT("VIPGender="), Gender);
+	FParse::Value(FCommandLine::Get(), TEXT("VIPAge="), Age);
+	VIPPatients::Choose(InWorld, Gender, Age);
 
 	DriveFace();
 

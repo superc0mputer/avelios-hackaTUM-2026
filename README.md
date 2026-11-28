@@ -120,14 +120,13 @@ Windows (PowerShell, from the repository folder; the policy flag applies to this
 powershell -ExecutionPolicy Bypass -File unreal\build.ps1 -Run
 ```
 
-The first build takes around 10 minutes on the Mac we tested. Later runs skip what is already built. Options on macOS:
+The first build takes around 10 minutes per patient on the Mac we tested. Later runs skip what is already built. Options on macOS:
 
 - `unreal/build.sh` builds without opening the window
 - `unreal/build.sh --clean` rebuilds from scratch
-- `VIP_PRESET=Bruce unreal/build.sh --clean` uses a different Epic preset
 - `UE_ROOT=/path/to/UE_5.8 unreal/build.sh` if Unreal is installed elsewhere
 
-On Windows use `-Clean` and `-Run`, and set `$env:VIP_PRESET` or `$env:UE_ROOT` first if needed. Clone to a short path without spaces, such as `C:\dev`.
+On Windows use `-Clean` and `-Run`, and set `$env:UE_ROOT` first if needed. Clone to a short path without spaces, such as `C:\dev`.
 
 Logs are in `unreal/VIPPatient/Saved/BuildLogs/`. To edit the scene, open `unreal/VIPPatient/VIPPatient.uproject` after building.
 
@@ -140,6 +139,23 @@ unreal/package.sh
 ```
 
 On Windows: `powershell -ExecutionPolicy Bypass -File unreal\package.ps1` (not tested yet). The app lands in `unreal/VIPPatient/Saved/Package/` and is about 2 GB. It contains Epic assets, so **never commit or publish it**; share it privately. The Mac app is not signed with a developer account yet, so another Mac will ask for permission the first time it opens.
+
+### Patients
+
+The app has six patients, built from Epic presets listed in `unreal/VIPPatient/Scripts/patients.json`. Ages are estimated from how the faces look:
+
+| Patient | Gender | Looks about |
+|---|---|---|
+| Sunita | female | 28 |
+| Lani | female | 58 |
+| Grace | female | 76 |
+| Trey | male | 25 |
+| Bruce | male | 50 |
+| Walter | male | 72 (default) |
+
+The app shows the patient closest to the case: gender first, then age. For now this comes from the command line, for example `-VIPGender=female -VIPAge=25` (from the case JSON later, #24). The camera and face lights follow the patient's head height.
+
+To add a patient, add a line to `patients.json` with an Epic preset name (see `Engine/Plugins/MetaHuman/MetaHumanCharacter/Content/Optional/Presets` in the Unreal folder) and run the build again. Each patient adds about 10 minutes of build time and about 0.5 GB to the app.
 
 ### How the patient speaks
 
