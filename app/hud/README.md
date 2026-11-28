@@ -1,34 +1,18 @@
-# The website on top of the patient (desktop app)
+# The website in the desktop app
 
-The Windows app shows **one window**. Up to the interview it is the website from `teacher-ui/` as it is.
-When the interview starts, the live patient fills the window and the interview controls float over them.
-Unreal runs without a window of its own and sends its picture to the page (`/ws/video`).
+The Windows app shows **one window**: the website from `teacher-ui/`. Unreal runs without a window of its
+own and sends its picture to the voice server (`/ws/video`). The website's interview screen draws that
+picture full screen behind the controls, and switches to a voice-only view when Unreal is not running or
+stops sending frames. This works the same in a normal browser, so there is one interview design for both.
 
-Nothing in `teacher-ui/` is changed for this. Keep building the website as usual; `page_server.py`
-adds `hud.css` and `hud.js` only when the app serves the page.
+`page_server.py` serves `teacher-ui/` and adds, only here:
 
-## Preview your website changes on the patient
+- `hud.js`: connects to the user's own ElevenLabs agent by signed link, and the **API KEYS** dialog for the
+  user's OpenAI and ElevenLabs keys;
+- `hud.css`: the small styling those need.
 
-Without Unreal the interview's background is a plain gradient, with the same layout:
+## Preview
 
 ```
 python app/hud/page_server.py          # http://127.0.0.1:8765, voice server on 8787 as usual
 ```
-
-## What happens to new website content
-
-- **Any screen except the interview** looks exactly as on the website. Nothing to do here.
-- **The interview** ("live" mode) places known parts around the patient's face. The app relies on these
-  names; if you rename one, update `hud.css`:
-
-| Name in `index.html` | Where it floats |
-|---|---|
-| `#interview-screen` | switches to live mode while visible |
-| `.interview-topline`, `.interview-tools` | top: title left, timer and buttons right |
-| `.patient-identity` | under the title |
-| `.student-notes-panel` | right edge |
-| `.conversation-card`, `#conversation-log` | bottom left |
-| `.patient-stage` | hidden (the real patient is behind the page) |
-
-A **new** block inside the interview screen is not placed automatically: give it a position in the
-"live mode" part of `hud.css`, keeping the middle of the screen free for the face.

@@ -70,7 +70,12 @@ ATTENTION_STATES = {"listening", "thinking", "idle"}
 # Routes ElevenLabs uses through the public tunnel (/v1/* also needs ENGINE_API_KEY).
 PUBLIC_PATHS = {"/v1/chat/completions", "/v1/models", "/health"}
 # Never through the tunnel, not even with the access code: the prompt holds the case's secrets.
-PRIVATE_PATHS = {"/prompt", "/cases", "/case", "/director"}
+PRIVATE_PATHS = {"/prompt", "/cases", "/case", "/director", "/turn"}
+# Teacher routes of the forwarded page: they hold the diagnoses (the answer key), so testers who come
+# through the tunnel get the student side only. (method, path); "*" matches every method.
+TEACHER_ONLY_ROUTES = {
+    ("*", "/api/cases"), ("*", "/api/case"), ("GET", "/api/practice-results"), ("*", "/api/grade"),
+}
 # The teacher page, forwarded for testers who come through the tunnel with the access code.
 TEACHER_UI_URL = os.getenv("TEACHER_UI_URL", "http://127.0.0.1:8765").rstrip("/")
 ACCESS_COOKIE = "vip_access"
@@ -344,6 +349,29 @@ def create_app(session: PatientSession | None = None, *, load_case: bool = True)
         start_direction(history)
         return {"ok": True, "director": app.state.session.director is not None}
 
+    @app.post("/turn")
+    async def typed_turn(request: Request) -> dict[str, Any]:
+        """A typed student turn (no voice available): {"messages": [...]} -> {"reply": ...}. Local only."""
+        if not _is_local(request):
+            raise HTTPException(403, "local only")
+        s: PatientSession = app.state.session
+        if s.client is None:
+            raise HTTPException(503, "no case loaded")
+        body = await request.json()
+        history = [
+            {"role": m["role"], "content": m["content"]} for m in body.get("messages", [])
+            if isinstance(m, dict) and m.get("role") in ("user", "assistant") and isinstance(m.get("content"), str)
+        ]
+        await app.state.stage.set_state("thinking")
+        start_direction(history)
+        try:
+            reply = await asyncio.to_thread(lambda: "".join(s.client.stream_reply(history)))
+        except LLMClientError as exc:
+            log.error("LLM error: %s", exc)
+            reply = ""
+        await app.state.stage.set_state("listening")
+        return {"reply": reply.strip() or FALLBACK_REPLY}
+
     def _key_status() -> dict[str, Any]:
         s: PatientSession = app.state.session
         return {
@@ -463,7 +491,8 @@ def create_app(session: PatientSession | None = None, *, load_case: bool = True)
         path = request.url.path
         if via_tunnel and path not in PUBLIC_PATHS:
             # Testers: the teacher page, after entering PUBLIC_ACCESS_CODE. Never the private routes.
-            if path in PRIVATE_PATHS or not access_code():
+            teacher_only = ("*", path) in TEACHER_ONLY_ROUTES or (request.method, path) in TEACHER_ONLY_ROUTES
+            if path in PRIVATE_PATHS or teacher_only or not access_code():
                 return JSONResponse({"error": "not available through the public tunnel"}, status_code=403)
             if path != "/access" and not has_access(request.cookies):
                 if request.method == "GET":

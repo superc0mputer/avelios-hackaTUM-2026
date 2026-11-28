@@ -189,6 +189,29 @@ def test_director_sets_the_face_per_turn():
     assert case["case_id"] and turns[-1]["content"] == "Hello, what brings you in today?"
 
 
+def test_typed_turn_replies_in_character():
+    client, completions = make_client()
+    r = client.post("/turn", json={"messages": history()})
+    assert r.json() == {"reply": "Well... it's my chest."}
+    # Our patient prompt goes first; the caller's system message is dropped
+    assert [m["role"] for m in completions.calls[-1]["messages"]] == ["system", "user"]
+    assert client.post("/turn", json={"messages": history()}, headers={"cf-ray": "x"}).status_code == 403
+
+
+def test_teacher_routes_closed_through_tunnel(monkeypatch):
+    monkeypatch.setenv("PUBLIC_ACCESS_CODE", "letmein")
+    client, _ = make_client()
+    from voice_server import ACCESS_COOKIE, access_token
+
+    client.cookies.set(ACCESS_COOKIE, access_token("letmein"))
+    tunnel = {"cf-ray": "x"}
+    # The answer key stays home, even for testers with the code
+    assert client.get("/api/cases", headers=tunnel).status_code == 403
+    assert client.get("/api/case?case_id=case-001", headers=tunnel).status_code == 403
+    assert client.get("/api/practice-results", headers=tunnel).status_code == 403
+    assert client.post("/api/grade", json={}, headers=tunnel).status_code == 403
+
+
 def test_page_reported_turn_drives_the_face():
     # The desktop app's agent calls OpenAI directly, so the page reports each student turn itself
     director = FakeDirector()

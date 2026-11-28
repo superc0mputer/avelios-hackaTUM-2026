@@ -66,7 +66,7 @@ class HudHandler(site.TeacherHandler):
         if urlparse(self.path).path == "/api/keys":
             self._proxy("DELETE", "/keys")
         else:
-            self.send_error(404, "Unknown API route")
+            super().do_DELETE()
 
     def _send(self, data: bytes, content_type: str):
         self.send_response(200)
