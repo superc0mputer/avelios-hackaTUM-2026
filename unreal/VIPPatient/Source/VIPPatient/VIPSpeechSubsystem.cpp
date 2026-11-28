@@ -47,6 +47,13 @@ namespace
 	constexpr float RestFraction = 0.5f;       // resting strength between turns
 	constexpr float MaxIntensity = 2.0f;
 	constexpr float SolverRampPerSecond = 2.5f; // the solver has one mood: fade it out, switch, fade in
+	// Head tilt for looking down (negative is down, checked in screenshots). Larger head offsets pull the
+	// face mesh's neck away from the collar, so the eyes do most of the looking away
+	constexpr float DownPitchDegrees = 0.0f;
+	// Turning the head toward -1 by more than about 1.5 degrees pulls the neck over the collar (the
+	// clothing follows the body, the head turn only the face), so looking away goes to this side.
+	// Can be overridden with -VIPSide=-1 for comparison
+	float PreferredSide = 1.0f;
 	constexpr float PainSeconds = 1.0f;        // how fast the lasting pain face follows the level
 	constexpr double WinceRise = 0.15, WinceHold = 0.35, WinceFall = 0.9;
 	constexpr float WinceStrength = 0.45f;     // on top of the lasting face, at pain 10
@@ -155,10 +162,16 @@ void UVIPSpeechSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 		bLogFace = true;
 	}
 	SetEmotion(Emotion, Intensity);
+	FParse::Value(FCommandLine::Get(), TEXT("VIPSide="), PreferredSide);
 	FString Breathing;
 	if (FParse::Value(FCommandLine::Get(), TEXT("VIPBreathing="), Breathing))
 	{
 		SetBreathing(Breathing);
+	}
+	float StartDiscomfort = 0;
+	if (FParse::Value(FCommandLine::Get(), TEXT("VIPDiscomfort="), StartDiscomfort))
+	{
+		SetDiscomfort(StartDiscomfort);
 	}
 	float Pain = 0;
 	if (FParse::Value(FCommandLine::Get(), TEXT("VIPPain="), Pain))
@@ -203,6 +216,11 @@ void UVIPSpeechSubsystem::ApplyTestStep(const FString& Step)
 	if (Step.StartsWith(TEXT("breathing=")))
 	{
 		SetBreathing(Step.Mid(10));
+		return;
+	}
+	if (Step.StartsWith(TEXT("discomfort=")))
+	{
+		SetDiscomfort(FCString::Atof(*Step.Mid(11)));
 		return;
 	}
 	if (Step == TEXT("wince"))
@@ -413,7 +431,7 @@ void UVIPSpeechSubsystem::SetAttention(const FString& State)
 	const FString NewAttention = bKnown ? Name : TEXT("listening");
 	if (NewAttention != Attention)
 	{
-		ThinkSide = FMath::RandBool() ? 1.0f : -1.0f; // people look to one side while thinking, not always the same
+		ThinkSide = PreferredSide; // people tend to look away to their preferred side
 		AttentionSetAt = FPlatformTime::Seconds();
 	}
 	Attention = NewAttention;
@@ -465,6 +483,16 @@ void UVIPSpeechSubsystem::SetPain(float InLevel)
 	UE_LOG(LogVIP, Display, TEXT("Pain %.1f"), PainLevel);
 }
 
+void UVIPSpeechSubsystem::SetDiscomfort(float InDiscomfort)
+{
+	if (Discomfort < 0.2f && InDiscomfort >= 0.2f)
+	{
+		AvoidSide = PreferredSide;
+	}
+	Discomfort = FMath::Clamp(InDiscomfort, 0.0f, 1.0f);
+	UE_LOG(LogVIP, Display, TEXT("Discomfort %.2f"), Discomfort);
+}
+
 void UVIPSpeechSubsystem::StopSpeaking()
 {
 	if (Queue)
@@ -500,8 +528,7 @@ void UVIPSpeechSubsystem::UpdateLife()
 	{
 		// eyes up and to one side, head following a little, blinking a bit more
 		P.Gaze = FVector2f(0.3f * ThinkSide, 0.3f);
-		P.HeadYaw = 4.0f * ThinkSide;
-		P.HeadPitch = 2.5f;
+		P.HeadYaw = 1.5f * ThinkSide; // small: larger head turns make the collar clip (see VIPLife.cpp)
 		P.GlanceRate = 0;
 		P.BlinkRate = 1.3f;
 	}
@@ -509,6 +536,17 @@ void UVIPSpeechSubsystem::UpdateLife()
 	{
 		P.GlanceRate = 0.15f;
 		P.NodsPerMinute = 6;
+	}
+	// Discomfort pulls gaze and head down and aside, blinks more and stops nodding (#38)
+	const float D = DiscomfortShown;
+	if (D > 0.01f)
+	{
+		P.Gaze = FMath::Lerp(P.Gaze, FVector2f(0.2f * AvoidSide, -0.5f), D);
+		P.HeadPitch = FMath::Lerp(P.HeadPitch, DownPitchDegrees, D);
+		P.HeadYaw = FMath::Lerp(P.HeadYaw, 1.5f * AvoidSide, D);
+		P.BlinkRate *= 1.0f + D;
+		P.NodsPerMinute *= 1.0f - D;
+		P.GlanceRate = FMath::Lerp(P.GlanceRate, 0.0f, D);
 	}
 	Life->Set(P);
 }
@@ -565,6 +603,15 @@ void UVIPSpeechSubsystem::UpdateEmotion(float DeltaTime)
 		{
 			WinceStart = -1;
 		}
+	}
+	// Discomfort eases in over a second or two and out more slowly; it shows a little in the brows
+	DiscomfortShown = Approach(DiscomfortShown, Discomfort, DeltaTime, Discomfort > DiscomfortShown ? 1.2f : 2.5f);
+	if (DiscomfortShown > 0.01f)
+	{
+		Offsets.FindOrAdd(TEXT("CTRL_expressions_browRaiseInL")) += 0.25f * DiscomfortShown;
+		Offsets.FindOrAdd(TEXT("CTRL_expressions_browRaiseInR")) += 0.25f * DiscomfortShown;
+		Offsets.FindOrAdd(TEXT("CTRL_expressions_mouthCornerDepressL")) += 0.12f * DiscomfortShown;
+		Offsets.FindOrAdd(TEXT("CTRL_expressions_mouthCornerDepressR")) += 0.12f * DiscomfortShown;
 	}
 	VIPExpressions::AddPain(PainShown + Wince * WinceStrength * FMath::Max(PainLevel, 3.0f) / 10.0f, Offsets);
 

@@ -69,6 +69,13 @@ public:
 	/** A named pattern: normal, fast_shallow, laboured, slow_deep, or a rate such as "22". */
 	void SetBreathing(const FString& Pattern);
 
+	/**
+	 * Discomfort 0 to 1 (#38): on sensitive topics the patient avoids eye contact, looks down and to
+	 * the side, blinks more and stops nodding. Eases back when it drops, e.g. after an empathetic
+	 * question.
+	 */
+	void SetDiscomfort(float InDiscomfort);
+
 	/** The student interrupted: stop talking now and look at them (#25, #37). */
 	void StopSpeaking();
 
@@ -127,6 +134,10 @@ private:
 	float BreathsPerMinute = 14;
 	float BreathDepth = 1;
 	float BreathShoulders = 0.15f;
+
+	float Discomfort = 0;       // asked for
+	float DiscomfortShown = 0;  // smoothed
+	float AvoidSide = 1;
 
 	float PainLevel = 0;  // 0 to 10, what was asked for
 	float PainShown = 0;  // 0 to 1, smoothed
