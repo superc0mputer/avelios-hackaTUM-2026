@@ -90,12 +90,10 @@ namespace
 				FAnimationPoseData Pose(Output);
 				Idle->GetAnimationPose(Pose, FAnimExtractContext(static_cast<double>(Time), false, {}, true));
 
-				// The face mesh does not follow the body's pelvis, spine or neck here, so when the idle
-				// shifts its weight the neck slides out of the collar. Hold those bones at the first
-				// frame; arms and shoulders keep moving
-				FPoseContext Still(Output);
-				FAnimationPoseData StillPose(Still);
-				Idle->GetAnimationPose(StillPose, FAnimExtractContext(0.0, false, {}, true));
+				// The face mesh does not follow the body's pelvis, spine or neck here, and its neck is
+				// modelled for the rest pose. Any other pose of those bones (even a still frame of the
+				// idle) moves the collar against the neck, so they stay at the rest pose; the arms and
+				// shoulders keep the idle's movement
 				const FBoneContainer& Bones = Output.Pose.GetBoneContainer();
 				for (const TCHAR* Bone : {TEXT("root"), TEXT("pelvis"), TEXT("spine_01"), TEXT("spine_02"), TEXT("spine_03"),
 					TEXT("spine_04"), TEXT("spine_05"), TEXT("neck_01"), TEXT("neck_02"), TEXT("head")})
@@ -108,7 +106,7 @@ namespace
 					const FCompactPoseBoneIndex Index = Bones.MakeCompactPoseIndex(FMeshPoseBoneIndex(MeshIndex));
 					if (Index.IsValid())
 					{
-						Output.Pose[Index] = Still.Pose[Index];
+						Output.Pose[Index] = Output.Pose.GetRefPose(Index);
 					}
 				}
 			}
