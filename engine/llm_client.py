@@ -118,9 +118,25 @@ class ChatActorClient:
         return self._system_prompt
 
     @property
+    def raw_client(self) -> Any:
+        """Return the underlying OpenAI SDK client (or test stub)."""
+        return self._client
+
+    @property
     def messages(self) -> list[dict[str, str]]:
         """Return a shallow copy of the current conversation history."""
         return [dict(msg) for msg in self._messages]
+
+    def update_system_prompt(self, system_prompt: str) -> None:
+        """Update the active system prompt without clearing conversation turns."""
+        cleaned = system_prompt.strip()
+        if not cleaned:
+            raise ValueError("system_prompt must not be empty.")
+        self._system_prompt = cleaned
+        if self._messages and self._messages[0].get("role") == "system":
+            self._messages[0] = {"role": "system", "content": cleaned}
+        else:
+            self._messages.insert(0, {"role": "system", "content": cleaned})
 
     def reset(self, system_prompt: str | None = None) -> None:
         """Clear conversation history and optionally update the system prompt."""
@@ -131,7 +147,12 @@ class ChatActorClient:
             self._system_prompt = cleaned
         self._messages = [{"role": "system", "content": self._system_prompt}]
 
-    def stream_reply(self, history: list[dict[str, str]]) -> Iterator[str]:
+    def stream_reply(
+        self,
+        history: list[dict[str, str]],
+        *,
+        system_prompt: str | None = None,
+    ) -> Iterator[str]:
         """Stream the patient's reply for an external conversation history.
 
         Stateless: ``history`` holds the student/patient turns (roles ``user`` and
@@ -140,6 +161,10 @@ class ChatActorClient:
         system message in ``history`` is ignored. The client's own history is not
         changed.
         """
+        active_prompt = system_prompt.strip() if system_prompt is not None else self._system_prompt
+        if not active_prompt:
+            raise ValueError("system_prompt must not be empty.")
+
         turns = [
             {"role": m["role"], "content": m["content"]}
             for m in history
@@ -147,7 +172,7 @@ class ChatActorClient:
         ]
         request_kwargs: dict[str, Any] = {
             "model": self._model,
-            "messages": [{"role": "system", "content": self._system_prompt}, *turns],
+            "messages": [{"role": "system", "content": active_prompt}, *turns],
             "max_completion_tokens": self._max_tokens,
             "stream": True,
         }
@@ -168,11 +193,19 @@ class ChatActorClient:
         except OpenAIError as exc:
             raise LLMClientError(f"OpenAI API request failed: {exc}") from exc
 
-    def send_message(self, user_message: str) -> str:
+    def send_message(
+        self,
+        user_message: str,
+        *,
+        system_prompt: str | None = None,
+    ) -> str:
         """Send a student turn to the model and return the patient's reply."""
         cleaned = user_message.strip()
         if not cleaned:
             raise ValueError("user_message must not be empty.")
+
+        if system_prompt is not None:
+            self.update_system_prompt(system_prompt)
 
         pending_messages = [*self._messages, {"role": "user", "content": cleaned}]
 
