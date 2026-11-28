@@ -18,31 +18,15 @@ flowchart LR
     C --> G["Teacher grades<br/>and gives feedback"]
 ```
 
-1. **Case creation.** The teacher enters the simulation parameters: diagnosis, age, gender, medical history, secrets the patient does not want to tell, and personality (aggressive, shy, ...). The UI exports them as JSON.
+1. **Case creation.** The teacher enters a short patient profile, symptom/history text, secrets, and personality/mood. The UI assigns the numbered case ID, derives the pair ID from the diagnosis, and exports schema-valid JSON.
 2. **Patient engine.** The LLM takes this JSON and holds a whole conversation in character. Each turn returns the reply and an emotion for voice and face. The student's speech is turned into text first.
 3. **Voice.** The reply is spoken with the requested emotion.
 4. **Visualisation.** An Unreal Engine MetaHuman plays the audio and shows the matching facial expression.
 5. **Feedback.** After the conversation the student fills out a checklist (for example: what did you find out about the patient?). The teacher grades the student based on it.
 
-## Interfaces (draft, agree on these first)
+## Interfaces
 
-These two formats let all four of us work in parallel. The values are examples.
-
-**Patient case** (Teacher UI → LLM), draft to refine in #7:
-
-```json
-{
-  "diagnosis": "stable angina",
-  "age": 58,
-  "gender": "male",
-  "medical_history": ["high blood pressure"],
-  "medication": ["blood-pressure tablets, often forgotten"],
-  "symptoms": ["chest tightness on the stairs since Tuesday"],
-  "lifestyle": ["20 cigarettes a day for 30 years"],
-  "secrets": ["often skips medication"],
-  "personality": ["downplays everything", "dry humour"]
-}
-```
+The patient case format is defined by [`cases/patient-case.schema.json`](cases/patient-case.schema.json). The teacher UI stores only case-specific information: patient details, diagnosis, personality and mood, free-text facts, and reluctant-to-reveal secrets. It assigns numbered case IDs, derives the pair ID from the diagnosis, and generates evaluation IDs automatically. Clinic setting and interview task are fixed app defaults; disclosure behavior follows the personality type.
 
 **Patient turn** (LLM → voice and visualisation), proposal to confirm in #5:
 
@@ -55,6 +39,8 @@ These two formats let all four of us work in parallel. The values are examples.
 ```
 
 Voice and face share one `emotion` field. The proposed values are MetaHuman's moods: `neutral`, `happy`, `sad`, `fear`, `disgust`, `anger`, `surprise`. Unknown values fall back to `neutral`. The 0 to 1 scale for `intensity` is a suggestion.
+
+Each patient case has a `personality.mood` field. It defines the patient's initial mood and should be used as the starting turn emotion.
 
 ## Who hands what to whom
 
@@ -90,7 +76,19 @@ Voice and face share one `emotion` field. The proposed values are MetaHuman's mo
 git clone https://github.com/superc0mputer/avelios-hackaTUM-2026.git
 ```
 
-There is no code yet, so setup instructions get added here as each part lands.
+### Teacher case-authoring UI
+
+Teachers can create a patient case through a three-step wizard. A character picker currently shows animated mock previews for six demo slots (three men and three women); each case stores the selected `character_id` for later MetaHuman asset linking. Enter one fact per line in the history fields. The local form uses `cases/patient-case.schema.json`, derives IDs, generates evaluation IDs in the background, and writes validated cases into `cases/`.
+
+```bash
+cd teacher-ui
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python server.py
+```
+
+Open <http://127.0.0.1:8765>. Stop the local server with **Ctrl+C**. The server binds to localhost and does not upload case data.
 
 - **OpenAI key:** Avelios offers a key with capped usage. Message them on Discord with team name, all members and one contact person with contact details.
 - **ElevenLabs key:** check the free limits on elevenlabs.io (#16).

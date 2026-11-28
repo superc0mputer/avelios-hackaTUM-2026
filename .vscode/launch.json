@@ -1,0 +1,14 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "VIP Teacher Case Studio",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/teacher-ui/server.py",
+      "cwd": "${workspaceFolder}/teacher-ui",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    }
+  ]
+}
