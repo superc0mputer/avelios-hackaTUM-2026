@@ -84,6 +84,11 @@ done
 
 # --- Python environment -----------------------------------------------------------
 mkdir -p "$logs" "$tools"
+if [ ! -x "$venv/bin/python" ] && command -v uv > /dev/null; then
+  # uv works where python3 -m venv does not (Debian without python3-venv)
+  say "creating the Python environment with uv (first run only)"
+  uv venv -q "$venv" || die "uv venv failed"
+fi
 if [ ! -x "$venv/bin/python" ]; then
   say "creating the Python environment (first run only)"
   # Resolve symlinks first: a venv made through a link to a uv-managed Python cannot find
@@ -99,7 +104,9 @@ stamp="$venv/.demo-requirements"
 if ! cat $requirements | cmp -s - "$stamp"; then
   say "installing Python packages"
   # shellcheck disable=SC2086
-  "$venv/bin/pip" install -q $(printf -- '-r %s ' $requirements) > "$logs/pip.log" 2>&1 \
+  if [ -x "$venv/bin/pip" ]; then install=("$venv/bin/pip" install -q); else install=(uv pip install -q --python "$venv/bin/python"); fi
+  # shellcheck disable=SC2086
+  "${install[@]}" $(printf -- '-r %s ' $requirements) > "$logs/pip.log" 2>&1 \
     || die "pip install failed, see $logs/pip.log"
   # shellcheck disable=SC2086
   cat $requirements > "$stamp"
