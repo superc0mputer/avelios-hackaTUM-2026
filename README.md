@@ -18,31 +18,15 @@ flowchart LR
     C --> G["Teacher grades<br/>and gives feedback"]
 ```
 
-1. **Case creation.** The teacher enters the simulation parameters: diagnosis, age, gender, medical history, secrets the patient does not want to tell, and personality (aggressive, shy, ...). The UI exports them as JSON.
+1. **Case creation.** The teacher enters a short patient profile, symptom/history text, secrets, and personality/mood. The UI assigns the numbered case ID, derives the pair ID from the diagnosis, and exports schema-valid JSON.
 2. **Patient engine.** The LLM takes this JSON and holds a whole conversation in character. Each turn returns the reply and an emotion for voice and face. The student's speech is turned into text first.
 3. **Voice.** The reply is spoken with the requested emotion.
 4. **Visualisation.** An Unreal Engine MetaHuman plays the audio and shows the matching facial expression.
 5. **Feedback.** After the conversation the student fills out a checklist (for example: what did you find out about the patient?). The teacher grades the student based on it.
 
-## Interfaces (draft, agree on these first)
+## Interfaces
 
-These two formats let all four of us work in parallel. The values are examples.
-
-**Patient case** (Teacher UI → LLM), draft to refine in #7:
-
-```json
-{
-  "diagnosis": "stable angina",
-  "age": 58,
-  "gender": "male",
-  "medical_history": ["high blood pressure"],
-  "medication": ["blood-pressure tablets, often forgotten"],
-  "symptoms": ["chest tightness on the stairs since Tuesday"],
-  "lifestyle": ["20 cigarettes a day for 30 years"],
-  "secrets": ["often skips medication"],
-  "personality": ["downplays everything", "dry humour"]
-}
-```
+The patient case format is defined by [`cases/patient-case.schema.json`](cases/patient-case.schema.json). The teacher UI stores only case-specific information: patient details, diagnosis, personality and mood, free-text facts, and reluctant-to-reveal secrets. It assigns numbered case IDs, derives the pair ID from the diagnosis, and generates evaluation IDs automatically. Clinic setting and interview task are fixed app defaults; disclosure behavior follows the personality type.
 
 **Patient turn** (LLM → voice and visualisation), proposal to confirm in #5:
 
@@ -55,6 +39,8 @@ These two formats let all four of us work in parallel. The values are examples.
 ```
 
 Voice and face share one `emotion` field. The values are MetaHuman's moods: `neutral`, `happy`, `sad`, `fear`, `disgust`, `anger`, `surprise`, `boredom`, `confidence`, `confusion`, `excitement`, `playfulness`. Unknown values fall back to `neutral`. The 0 to 1 scale for `intensity` is a suggestion.
+
+Each patient case has a `personality.mood` field. It defines the patient's initial mood and should be used as the starting turn emotion.
 
 ## Who hands what to whom
 
@@ -97,6 +83,38 @@ So far only the Unreal patient can be run (see below). Other setup instructions 
 - **Keys** go in a local `.env` file that is never committed.
 - **Unreal:** version 5.8 (see below).
 - **Questions:** the Avelios mentors are on site all weekend.
+
+## Run the voice patient (ElevenLabs + engine)
+
+ElevenLabs Agents does speech-to-text, turn-taking and the voice. It calls our engine as its **custom LLM** on every turn: `engine/voice_server.py` builds the patient prompt from the case and streams the OpenAI reply back.
+
+```bash
+cd engine
+python -m venv .venv && .venv/bin/pip install -r requirements.txt   # or: uv venv && uv pip install -r requirements.txt
+cp .env.example .env    # add OPENAI_API_KEY; optional ENGINE_API_KEY, PATIENT_CASE_PATH
+.venv/bin/uvicorn voice_server:app --host 127.0.0.1 --port 8787
+cloudflared tunnel --url http://127.0.0.1:8787   # ElevenLabs needs a public HTTPS URL
+```
+
+To interview a case made in the teacher UI, run the teacher UI next to it (`cd teacher-ui && python server.py`, `TEACHER_UI_HOST=0.0.0.0` to reach it from another machine), save a case and click **Start conversation**. It loads the case into the voice server (`POST /case`, local only) and opens a **live interview panel on the same page** (ElevenLabs browser SDK, live transcript; set `ELEVENLABS_AGENT_ID` in `engine/.env`). The microphone only works over **HTTPS** or on `localhost`: serve the teacher UI over HTTPS (e.g. `tailscale serve --https=8446 8765`) and map `/ws` to the voice server on the same host (`tailscale serve --https=8446 --set-path /ws http://127.0.0.1:8787/ws`), so the page can relay the patient's voice to Unreal. Teacher-UI cases are translated to the engine's `PatientConfig` by `engine/case_adapter.py`: first symptom = told freely, other facts = only when asked, secrets = gated; the diagnosis never reaches the patient.
+
+In the ElevenLabs agent: LLM = **Custom LLM**, server URL = `https://<tunnel-host>/v1`, API key = the same value as `ENGINE_API_KEY` (stored as a secret). Leave the agent's own prompt short and the first message empty; the patient waits for the student. Through the tunnel only `/v1/chat/completions`, `/v1/models` and `/health` are reachable. Tests: `.venv/bin/python -m pytest -q tests`.
+
+### Connect the MetaHuman
+
+The patient's voice and emotion reach Unreal through the voice server:
+
+```
+teacher page (ElevenLabs SDK) --audio--> voice server /ws/stage --audio + emotion--> /ws/unreal <-- Unreal (VIPBackendLink)
+```
+
+- Start the voice server on an address Unreal can reach (`--host 0.0.0.0`; `/ws/*` is refused through the public tunnel).
+- Start Unreal with `VIP_SERVER=ws://<voice-server-host>:8787/ws/unreal unreal/build.sh --run`, or pass `-VIPServer=ws://...` to the editor or the packaged app.
+- Messages to Unreal, as JSON text:
+  - `{"type":"audio","sample_rate":16000,"pcm_b64":...}`: the patient's voice as mono 16-bit PCM → `UVIPSpeechSubsystem::Speak`;
+  - `{"type":"emotion","emotion":"sad","intensity":0.6}` → `SetEmotion` (the case's starting mood for now);
+  - `{"type":"interrupt"}`: the student talked over the patient (logged only for now).
+- While an Unreal client is connected, the teacher page mutes its own playback, so the patient speaks only through the MetaHuman.
 
 ## Run the Unreal patient
 

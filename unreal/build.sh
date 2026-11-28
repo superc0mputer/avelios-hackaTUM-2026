@@ -4,7 +4,8 @@
 #   unreal/build.sh --clean    delete the generated content and rebuild
 #   unreal/build.sh --run      build if needed, then open the patient window
 #   unreal/package.sh          standalone app for people without Unreal
-# Patients: unreal/VIPPatient/Scripts/patients.json. Option: UE_ROOT=<engine folder>
+# Patients: unreal/VIPPatient/Scripts/patients.json. Options: UE_ROOT=<engine folder>
+#          VIP_SERVER=ws://<host>:8787/ws/unreal  connect the patient to the voice server (--run)
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -76,7 +77,9 @@ stage build_scene "$content/Patient/ConsultationRoom.umap"
 
 echo "Patient ready."
 if [ "$run" = 1 ]; then
-  "$editor" "$project" -game -windowed -resx=1280 -resy=720 -stdout -FullStdOutLogOutput > "$logs/game.log" 2>&1
+  server_arg=()
+  [ -n "${VIP_SERVER:-}" ] && server_arg=("-VIPServer=$VIP_SERVER")
+  "$editor" "$project" -game -windowed -resx=1280 -resy=720 ${server_arg[@]+"${server_arg[@]}"} -stdout -FullStdOutLogOutput > "$logs/game.log" 2>&1
 else
   echo "Show it:  unreal/build.sh --run"
 fi

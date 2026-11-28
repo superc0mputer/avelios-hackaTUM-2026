@@ -1,0 +1,51 @@
+{
+  "case_id": "gerhard_mueller_acs_01",
+  "case_title": "Acute Chest Pressure in the Emergency Department",
+  "language": "English",
+  "clinical_setting": "Emergency Department",
+  "chief_complaint": "Acute chest pressure since this morning",
+  "opening_line": "Look, my chest has been feeling tight since this morning, and I really need to get back to the job site soon.",
+  "demographics": {
+    "full_name": "Gerhard Müller",
+    "age": 58,
+    "gender": "male",
+    "occupation": "construction tradesman",
+    "living_situation": "Lives with his wife; works full-time on construction sites."
+  },
+  "affect_profile": {
+    "baseline_mood": "impatient, stressed about missing work, quietly masking underlying anxiety",
+    "communication_style": "terse, pragmatic, everyday speech; tends to downplay symptoms",
+    "cooperation_level": "moderate",
+    "health_literacy": "low",
+    "pain_level": 6,
+    "emotional_triggers": [
+      "being lectured about taking medication",
+      "dismissive or rushed questioning",
+      "unexplained medical jargon"
+    ],
+    "rapport_builders": [
+      "calm and respectful demeanor",
+      "acknowledging his stress about missing work",
+      "asking empathetically about his worries or fears"
+    ]
+  },
+  "information_tiers": {
+    "spontaneous": [
+      "Chest has felt tight and heavy with pressure since this morning.",
+      "Wants to be cleared quickly so he can get back to the construction site."
+    ],
+    "on_specific_query": [
+      "The chest pressure radiates into his left arm.",
+      "Known history of high blood pressure.",
+      "Prescribed Ramipril for blood pressure, but takes it irregularly and often skips doses."
+    ],
+    "gated_secrets": [
+      "Deep fear of dying from a heart attack because his father died of a heart attack at age 59."
+    ],
+    "unlock_condition": "Reveal only after the student demonstrates genuine empathy, asks directly about his worries or fears, or builds authentic rapport.",
+    "unknowns": [
+      "Exact dosage (milligrams) of his Ramipril tablets.",
+      "Exact clock time when the chest pressure started this morning."
+    ]
+  }
+}
