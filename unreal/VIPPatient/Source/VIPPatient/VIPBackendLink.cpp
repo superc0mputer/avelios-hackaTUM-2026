@@ -2,6 +2,7 @@
 
 #include "VIPCase.h"
 #include "VIPSpeechSubsystem.h"
+#include "VIPVideoStream.h"
 
 #include "Dom/JsonObject.h"
 #include "IWebSocket.h"
@@ -64,6 +65,7 @@ void UVIPBackendLink::Connect()
 		if (WeakThis.IsValid())
 		{
 			UE_LOG(LogVIPLink, Warning, TEXT("Cannot reach %s: %s"), *WeakThis->Url, *Error);
+			WeakThis->StopVideo();
 			WeakThis->ScheduleReconnect();
 		}
 	});
@@ -72,6 +74,7 @@ void UVIPBackendLink::Connect()
 		if (WeakThis.IsValid())
 		{
 			UE_LOG(LogVIPLink, Warning, TEXT("Voice server closed the link (%d %s)"), StatusCode, *Reason);
+			WeakThis->StopVideo();
 			WeakThis->ScheduleReconnect();
 		}
 	});
@@ -85,6 +88,23 @@ void UVIPBackendLink::Connect()
 
 	UE_LOG(LogVIPLink, Display, TEXT("Connecting to %s"), *Url);
 	Socket->Connect();
+}
+
+void UVIPBackendLink::SendBinary(const uint8* Data, int64 Size)
+{
+	if (Socket.IsValid() && Socket->IsConnected() && Size > 0)
+	{
+		Socket->Send(Data, static_cast<SIZE_T>(Size), true);
+	}
+}
+
+void UVIPBackendLink::StopVideo()
+{
+	UWorld* World = GetWorld();
+	if (UVIPVideoStream* Video = World ? World->GetSubsystem<UVIPVideoStream>() : nullptr)
+	{
+		Video->SetViewers(0); // nobody can watch while the link is down
+	}
 }
 
 void UVIPBackendLink::ScheduleReconnect()
@@ -156,6 +176,10 @@ void UVIPBackendLink::HandleMessage(const FString& Message)
 		TArray<int16> Samples;
 		Samples.SetNumUninitialized(Bytes.Num() / sizeof(int16));
 		FMemory::Memcpy(Samples.GetData(), Bytes.GetData(), Samples.Num() * sizeof(int16));
+		// false: a tester elsewhere hears the voice in their browser; here only the lips move
+		bool bAudible = true;
+		Json->TryGetBoolField(TEXT("audible"), bAudible);
+		Speech->SetVoiceAudible(bAudible);
 		Speech->Speak(Samples, SampleRate);
 	}
 	else if (Type == TEXT("emotion"))
@@ -189,6 +213,16 @@ void UVIPBackendLink::HandleMessage(const FString& Message)
 		FString State;
 		Json->TryGetStringField(TEXT("state"), State);
 		Speech->SetAttention(State);
+	}
+	else if (Type == TEXT("viewers"))
+	{
+		// {"type":"viewers","count":n}: browsers watching the live video (UVIPVideoStream)
+		int32 Count = 0;
+		Json->TryGetNumberField(TEXT("count"), Count);
+		if (UVIPVideoStream* Video = World->GetSubsystem<UVIPVideoStream>())
+		{
+			Video->SetViewers(Count);
+		}
 	}
 	else if (Type == TEXT("case"))
 	{

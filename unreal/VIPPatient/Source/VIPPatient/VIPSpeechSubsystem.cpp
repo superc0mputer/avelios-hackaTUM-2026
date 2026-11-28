@@ -671,6 +671,15 @@ void UVIPSpeechSubsystem::SetDiscomfort(float InDiscomfort)
 	UE_LOG(LogVIP, Display, TEXT("Discomfort %.2f"), Discomfort);
 }
 
+void UVIPSpeechSubsystem::SetVoiceAudible(bool bAudible)
+{
+	if (VoicePlayer)
+	{
+		// Not exactly 0: a silent sound may be culled, and the queued speech would stop
+		VoicePlayer->SetVolumeMultiplier(bAudible ? 1.0f : 0.001f);
+	}
+}
+
 void UVIPSpeechSubsystem::StopSpeaking()
 {
 	if (Queue)

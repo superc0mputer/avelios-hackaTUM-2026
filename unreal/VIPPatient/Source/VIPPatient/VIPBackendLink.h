@@ -35,6 +35,9 @@ public:
 	virtual void Tick(float DeltaTime) override;
 	virtual TStatId GetStatId() const override;
 
+	/** Binary message to the voice server (JPEG frames from UVIPVideoStream); dropped while offline. */
+	void SendBinary(const uint8* Data, int64 Size);
+
 protected:
 
 	virtual bool DoesSupportWorldType(const EWorldType::Type WorldType) const override;
@@ -44,6 +47,7 @@ private:
 	void Connect();
 	void ScheduleReconnect();
 	void HandleMessage(const FString& Message);
+	void StopVideo();
 
 	FString Url;
 	TSharedPtr<IWebSocket> Socket;
