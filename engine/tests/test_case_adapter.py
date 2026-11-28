@@ -72,4 +72,5 @@ def test_presentation_reaches_the_prompt():
     assert "6/10" in build_system_prompt(config)
     case["presentation"] = {"breathing": 30}
     assert "short of breath" in teacher_case_to_config(case).affect_profile.communication_style.lower()
-    assert teacher_case_to_config(base).affect_profile.pain_level is None
+    bare = {k: v for k, v in base.items() if k != "presentation"}
+    assert teacher_case_to_config(bare).affect_profile.pain_level is None

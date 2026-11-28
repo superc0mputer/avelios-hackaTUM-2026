@@ -1,0 +1,93 @@
+{
+  "schema_version": "1.2",
+  "case_id": "case-102",
+  "case_pair_id": "acute-exacerbation-of-copd-probably-triggered-by-a-chest-infection",
+  "character_id": "woman-02",
+  "diagnosis": "Acute exacerbation of COPD, probably triggered by a chest infection",
+  "patient": {
+    "name": "Margaret Wilson",
+    "age": 76,
+    "gender": "female",
+    "life_story": "Margaret is a retired school secretary and has been a widow for two years. She lives alone in a second-floor flat with no lift, loves her crossword and her budgie, and her daughter Claire lives twenty minutes away. Her husband died in hospital, and she dreads going back there."
+  },
+  "personality": {
+    "type": "anxious_talkative",
+    "mood": "fear",
+    "description": "Margaret wants to tell everything and worries out loud, but she is too breathless to finish long sentences. She keeps asking whether she will have to go to hospital. She settles when the student is calm, patient and explains things."
+  },
+  "presentation": {
+    "pain": 0,
+    "breathing": "laboured",
+    "discomfort": 0,
+    "visible_signs": [
+      "cyanosis",
+      "tired"
+    ]
+  },
+  "symptoms": [
+    "She has been getting more and more breathless for four days; now she gets breathless walking from the bedroom to the kitchen and while talking.",
+    "Her cough is worse and she is bringing up more phlegm, which has turned from white to yellow-green.",
+    "She is wheezy, especially at night, and has been sleeping propped up in the armchair.",
+    "She felt hot and shivery two days ago. It started after her grandson visited with a cold. She has no chest pain and no swollen legs."
+  ],
+  "medical_history": [
+    "COPD diagnosed eight years ago.",
+    "Two flare-ups last year; one needed a hospital stay of five days.",
+    "Osteoporosis."
+  ],
+  "medications": [
+    "Tiotropium inhaler once a day (see secrets).",
+    "Salbutamol blue inhaler when needed; using it almost every hour now.",
+    "Alendronate once a week."
+  ],
+  "allergies": [
+    "No known allergies."
+  ],
+  "family_history": [
+    "Her mother had a 'bad chest' and was a smoker."
+  ],
+  "lifestyle": [
+    "Lives alone in a second-floor flat; her daughter visits twice a week.",
+    "Says she gave up smoking when the COPD was diagnosed; smoked about 20 a day for 40 years before that.",
+    "Has not been out to the shops for four days and is eating very little."
+  ],
+  "secrets": [
+    "Started smoking again after her husband died: three or four cigarettes a day, 'only when I'm upset'.",
+    "Ran out of her tiotropium inhaler about a week ago and has not reordered it.",
+    "Is frightened of being admitted, because her husband died on a ward, and so waited four days before asking for help."
+  ],
+  "evaluation_fact_ids": {
+    "symptoms": [
+      "symptoms-001",
+      "symptoms-002",
+      "symptoms-003",
+      "symptoms-004"
+    ],
+    "medical_history": [
+      "medical_history-001",
+      "medical_history-002",
+      "medical_history-003"
+    ],
+    "medications": [
+      "medications-001",
+      "medications-002",
+      "medications-003"
+    ],
+    "allergies": [
+      "allergies-001"
+    ],
+    "family_history": [
+      "family_history-001"
+    ],
+    "lifestyle": [
+      "lifestyle-001",
+      "lifestyle-002",
+      "lifestyle-003"
+    ],
+    "secrets": [
+      "secrets-001",
+      "secrets-002",
+      "secrets-003"
+    ]
+  }
+}

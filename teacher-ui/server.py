@@ -42,11 +42,15 @@ def slug(value: str) -> str:
     return re.sub(r"-+", "-", re.sub(r"[^a-z0-9]+", "-", normalized.lower())).strip("-")
 
 
+# case-100 to case-199 are the preset demo scenarios; teacher cases are numbered around them.
+PRESET_CASE_NUMBERS = range(100, 200)
+
+
 def next_case_id() -> str:
     numbers = []
     for path in CASES_ROOT.glob("case-*.json"):
         match = re.fullmatch(r"case-(\d+)\.json", path.name)
-        if match:
+        if match and int(match.group(1)) not in PRESET_CASE_NUMBERS:
             numbers.append(int(match.group(1)))
     return f"case-{max(numbers, default=0) + 1:03d}"
 
