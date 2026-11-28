@@ -21,6 +21,12 @@ void FVIPSpeechQueue::Add(const TArray<float>& Samples)
 	Pending.Append(Samples);
 }
 
+void FVIPSpeechQueue::Clear()
+{
+	FScopeLock Lock(&Mutex);
+	Pending.Reset();
+}
+
 void FVIPSpeechQueue::Take(TArray<float>& Out, int32 Count)
 {
 	Out.SetNumZeroed(Count);

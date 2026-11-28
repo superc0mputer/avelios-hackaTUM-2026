@@ -133,9 +133,8 @@ void UVIPSpeechSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	VIPPatients::Choose(InWorld, Gender, Age, &LooksAge);
 
 	// Older patients move less and slower
-	FVIPLifeParams LifeParams;
-	LifeParams.Movement = LooksAge >= 70 ? 0.65f : LooksAge >= 55 ? 0.8f : 1.0f;
-	Life->Set(LifeParams);
+	LifeMovement = LooksAge >= 70 ? 0.65f : LooksAge >= 55 ? 0.8f : 1.0f;
+	UpdateLife();
 
 	DriveFace();
 
@@ -176,6 +175,17 @@ void UVIPSpeechSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 
 void UVIPSpeechSubsystem::ApplyTestStep(const FString& Step)
 {
+	// "listening", "thinking", "idle": attention; "stop": interrupt
+	if (Step == TEXT("listening") || Step == TEXT("thinking") || Step == TEXT("idle"))
+	{
+		SetAttention(Step);
+		return;
+	}
+	if (Step == TEXT("stop"))
+	{
+		StopSpeaking();
+		return;
+	}
 	// "sad" or "sad@1.5": emotion at an intensity
 	FString Name = Step;
 	FString Strength;
@@ -358,6 +368,72 @@ void UVIPSpeechSubsystem::Speak(const TArray<int16>& Samples, int32 SampleRate)
 	UE_LOG(LogVIP, Display, TEXT("Speaking %.1f s"), static_cast<float>(Audio.Num()) / Queue->SampleRate);
 }
 
+void UVIPSpeechSubsystem::SetAttention(const FString& State)
+{
+	const FString Name = State.TrimStartAndEnd().ToLower();
+	const bool bKnown = Name == TEXT("listening") || Name == TEXT("thinking") || Name == TEXT("idle");
+	if (!bKnown)
+	{
+		UE_LOG(LogVIP, Warning, TEXT("Unknown attention '%s', using listening"), *State);
+	}
+	const FString NewAttention = bKnown ? Name : TEXT("listening");
+	if (NewAttention != Attention)
+	{
+		ThinkSide = FMath::RandBool() ? 1.0f : -1.0f; // people look to one side while thinking, not always the same
+		AttentionSetAt = FPlatformTime::Seconds();
+	}
+	Attention = NewAttention;
+	UE_LOG(LogVIP, Display, TEXT("Attention %s"), *Attention);
+}
+
+void UVIPSpeechSubsystem::StopSpeaking()
+{
+	if (Queue)
+	{
+		Queue->Clear();
+	}
+	if (Voice)
+	{
+		Voice->ResetAudio();
+	}
+	DelayedSound.Reset();
+	SpeakingUntil = FPlatformTime::Seconds();
+	Attention = TEXT("listening");
+	UE_LOG(LogVIP, Display, TEXT("Stopped speaking (interrupted)"));
+}
+
+void UVIPSpeechSubsystem::UpdateLife()
+{
+	if (!Life)
+	{
+		return;
+	}
+	FVIPLifeParams P;
+	P.Movement = LifeMovement;
+	const bool bSpeaking = FPlatformTime::Seconds() < SpeakingUntil;
+	if (bSpeaking)
+	{
+		// people look away more while they talk, and back to check on the listener
+		P.GlanceRate = 0.6f;
+		P.BlinkRate = 1.2f;
+	}
+	else if (Attention == TEXT("thinking"))
+	{
+		// eyes up and to one side, head following a little, blinking a bit more
+		P.Gaze = FVector2f(0.3f * ThinkSide, 0.3f);
+		P.HeadYaw = 4.0f * ThinkSide;
+		P.HeadPitch = 2.5f;
+		P.GlanceRate = 0;
+		P.BlinkRate = 1.3f;
+	}
+	else if (Attention == TEXT("listening"))
+	{
+		P.GlanceRate = 0.15f;
+		P.NodsPerMinute = 6;
+	}
+	Life->Set(P);
+}
+
 void UVIPSpeechSubsystem::SetEmotion(const FString& Emotion, float Intensity)
 {
 	const FString Name = Emotion.TrimStartAndEnd().ToLower();
@@ -456,6 +532,7 @@ void UVIPSpeechSubsystem::Tick(float DeltaTime)
 
 	RunShots(Now);
 	UpdateEmotion(DeltaTime);
+	UpdateLife();
 
 	if (NextTestAt > 0 && Now >= NextTestAt)
 	{

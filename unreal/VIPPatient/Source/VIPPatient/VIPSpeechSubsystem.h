@@ -46,6 +46,16 @@ public:
 	 */
 	void SetEmotion(const FString& Emotion, float Intensity);
 
+	/**
+	 * What the patient is doing in the conversation (#37): "listening" (the student talks: eye
+	 * contact, small nods), "thinking" (the answer is being generated: looks up and aside) or
+	 * "idle". While speech plays the patient is "speaking" regardless. Unknown values mean listening.
+	 */
+	void SetAttention(const FString& State);
+
+	/** The student interrupted: stop talking now and look at them (#25, #37). */
+	void StopSpeaking();
+
 protected:
 
 	virtual bool DoesSupportWorldType(const EWorldType::Type WorldType) const override;
@@ -56,6 +66,7 @@ private:
 	void DriveFace();
 	void AnimateBody(USkeletalMeshComponent& Body);
 	void UpdateEmotion(float DeltaTime);
+	void UpdateLife();
 	void ApplySolverMood();
 	void LogFace(float DeltaTime);
 	void ApplyTestStep(const FString& Step);
@@ -85,6 +96,10 @@ private:
 	// Emotion: what was asked for, and where the blend currently is
 	TSharedPtr<FVIPExpressionLayer> Expressions;
 	TSharedPtr<FVIPLife> Life;
+	float LifeMovement = 1;
+	FString Attention = TEXT("listening");
+	double AttentionSetAt = 0;
+	float ThinkSide = 1;
 	FString TargetEmotion = TEXT("neutral");
 	float TargetIntensity = 0;
 	double EmotionSetAt = 0;

@@ -20,6 +20,9 @@ public:
 	/** Fills Out with the next samples, padded with silence. */
 	void Take(TArray<float>& Out, int32 Count);
 
+	/** Drops everything not yet animated (the patient was interrupted). */
+	void Clear();
+
 	const int32 SampleRate;
 
 private:

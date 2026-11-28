@@ -15,6 +15,8 @@ namespace
 	constexpr float GlanceHeadFollow = 6.0f; // degrees of head turn per unit of glance
 
 	constexpr double HeadDegrees = 2.0;
+	constexpr double NodSeconds = 0.7;
+	constexpr float NodDegrees = 2.5f;
 	constexpr float HeadOffsetSeconds = 0.6f;
 
 	/** 0 to 1 and back: shuts quickly, opens a little slower, like a real blink. */
@@ -101,7 +103,33 @@ FRotator FVIPLife::Apply(TMap<FString, float>& Controls, double Now)
 	const FRotator Wanted3(P.HeadPitch + Eye.Y * GlanceHeadFollow * 0.5f, P.HeadYaw + Eye.X * GlanceHeadFollow, 0);
 	Head.Pitch = Approach(Head.Pitch, Wanted3.Pitch, Delta, HeadOffsetSeconds / Move);
 	Head.Yaw = Approach(Head.Yaw, Wanted3.Yaw, Delta, HeadOffsetSeconds / Move);
-	return Sway + Head;
+	// Listening nods: a small dip and back, sometimes twice
+	FRotator Nod = FRotator::ZeroRotator;
+	if (P.NodsPerMinute > 0)
+	{
+		if (NextNod == 0 || NextNod > Now + 60.0 / P.NodsPerMinute * 2)
+		{
+			NextNod = Now + Random.FRandRange(0.5f, 1.5f) * 60.0 / P.NodsPerMinute;
+		}
+		if (NodStart < 0 && Now >= NextNod)
+		{
+			NodStart = Now;
+		}
+	}
+	if (NodStart >= 0)
+	{
+		const double Progress = (Now - NodStart) / NodSeconds;
+		if (Progress >= 1.0)
+		{
+			NodStart = -1;
+			NextNod = P.NodsPerMinute > 0 ? Now + Random.FRandRange(0.5f, 1.5f) * 60.0 / P.NodsPerMinute : 0;
+		}
+		else
+		{
+			Nod.Pitch = NodDegrees * Move * FMath::Sin(Progress * PI) * (Progress < 0.5 ? 1.0f : 0.8f);
+		}
+	}
+	return Sway + Head + Nod;
 }
 
 void FVIPLife::UpdateEyes(double Now, const FVIPLifeParams& P)
