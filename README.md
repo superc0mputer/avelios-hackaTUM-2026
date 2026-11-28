@@ -96,6 +96,17 @@ cp .env.example .env    # add OPENAI_API_KEY; optional ENGINE_API_KEY, PATIENT_C
 cloudflared tunnel --url http://127.0.0.1:8787   # ElevenLabs needs a public HTTPS URL
 ```
 
+Windows (PowerShell). On a fresh PC `python` is often only the Microsoft Store shortcut, so install Python first (`winget install Python.Python.3.12`, then open a new terminal):
+
+```powershell
+cd engine
+python -m venv .venv; .venv\Scripts\pip install -r requirements.txt
+copy .env.example .env    # add OPENAI_API_KEY; optional ENGINE_API_KEY, PATIENT_CASE_PATH
+.venv\Scripts\uvicorn voice_server:app --host 127.0.0.1 --port 8787
+```
+
+The teacher UI runs with the same environment: `cd teacher-ui; ..\engine\.venv\Scripts\python server.py`. Tests: `.venv\Scripts\python -m pytest -q tests`.
+
 To interview a case made in the teacher UI, run the teacher UI next to it (`cd teacher-ui && python server.py`, `TEACHER_UI_HOST=0.0.0.0` to reach it from another machine), save a case and click **Start conversation**. It loads the case into the voice server (`POST /case`, local only) and opens a **live interview panel on the same page** (ElevenLabs browser SDK, live transcript; set `ELEVENLABS_AGENT_ID` in `engine/.env`). The microphone only works over **HTTPS** or on `localhost`: serve the teacher UI over HTTPS (e.g. `tailscale serve --https=8446 8765`) and map `/ws` to the voice server on the same host (`tailscale serve --https=8446 --set-path /ws http://127.0.0.1:8787/ws`), so the page can relay the patient's voice to Unreal. Teacher-UI cases are translated to the engine's `PatientConfig` by `engine/case_adapter.py`: first symptom = told freely, other facts = only when asked, secrets = gated; the diagnosis never reaches the patient.
 
 In the ElevenLabs agent: LLM = **Custom LLM**, server URL = `https://<tunnel-host>/v1`, API key = the same value as `ENGINE_API_KEY` (stored as a secret). Leave the agent's own prompt short and the first message empty; the patient waits for the student. Through the tunnel only `/v1/chat/completions`, `/v1/models` and `/health` are reachable. Tests: `.venv/bin/python -m pytest -q tests`.
@@ -121,7 +132,7 @@ teacher page (ElevenLabs SDK) --audio--> voice server /ws/stage --audio + emotio
 The repository holds only our project file, config, C++ module and build scripts. The MetaHuman is **rebuilt on your machine** from an Epic preset, so no Epic assets are published.
 
 **You need**
-- macOS (tested on an M4 MacBook Air with 16 GB, Xcode 26.6, and an M2 Pro MacBook Pro with 16 GB, Xcode 27) or Windows (**not tested yet**; needs Visual Studio 2022 with "Game development with C++"). Linux is not supported.
+- macOS (tested on an M4 MacBook Air with 16 GB, Xcode 26.6, and an M2 Pro MacBook Pro with 16 GB, Xcode 27) or Windows (tested on Windows 11 with Visual Studio 2022 17.14 and "Game development with C++"; see the Windows notes below). Linux is not supported.
 - Unreal Engine 5.8 with **MetaHuman Creator Core Data** (Epic Games Launcher → 5.8 → Options)
 - An Epic account signed in through the launcher, and internet: textures and rig come from Epic's online services
 - On Xcode 26 or later, the Metal toolchain (Unreal compiles its shaders with it; without it the first build stops with "missing Metal Toolchain"): `xcodebuild -downloadComponent MetalToolchain`
@@ -146,6 +157,13 @@ The first build takes around 10 minutes per patient on the Mac we tested (about 
 - `UE_ROOT=/path/to/UE_5.8 unreal/build.sh` if Unreal is installed elsewhere
 
 On Windows use `-Clean` and `-Run`, and set `$env:UE_ROOT` first if needed. Clone to a short path without spaces, such as `C:\dev`.
+
+Windows notes:
+
+- Visual Studio 2022 **17.14 or later** (MSVC 14.44). Older compilers fail on Unreal 5.8's headers, and Unreal refuses MSVC 14.43. Update it in the Visual Studio Installer.
+- If Unreal was not installed through the Epic Games Launcher, the script cannot find it in the registry: `$env:UE_ROOT = "D:\path\to\UE_5.8"`.
+- If your clone already sits under a path with spaces, point a junction at it instead of moving it: `New-Item -ItemType Junction -Path C:\dev\vip -Target "<your clone>"`, then run `build.ps1` from `C:\dev\vip`.
+- MSVC rejects narrowing conversions inside `{}` that the Mac's clang accepts (for example `FRandomStream Random{FPlatformTime::Cycles()}`), so cast explicitly in shared C++ code.
 
 Logs are in `unreal/VIPPatient/Saved/BuildLogs/`. To edit the scene, open `unreal/VIPPatient/VIPPatient.uproject` after building.
 

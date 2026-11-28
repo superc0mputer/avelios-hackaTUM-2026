@@ -51,7 +51,7 @@ private:
 	FVIPLifeParams Params;
 
 	// Pipeline thread only
-	FRandomStream Random{FPlatformTime::Cycles()};
+	FRandomStream Random{static_cast<int32>(FPlatformTime::Cycles())};
 	double StartTime = FPlatformTime::Seconds();
 	double LastTime = 0;
 	FVector2f Eye = FVector2f::ZeroVector;      // where the eyes are
