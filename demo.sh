@@ -52,7 +52,12 @@ done
 mkdir -p "$logs" "$tools"
 if [ ! -x "$venv/bin/python" ]; then
   say "creating the Python environment (first run only)"
-  python3 -m venv "$venv" || die "python3 -m venv failed; install Python 3.11 or newer"
+  # Resolve symlinks first: a venv made through a link to a uv-managed Python cannot find
+  # the standard library ("No module named 'encodings'")
+  python="$(python3 -c 'import os, sys; print(os.path.realpath(sys.executable)) if sys.version_info >= (3, 10) else None')" \
+    || die "python3 not found; install Python 3.10 or newer"
+  [ -n "$python" ] || die "python3 is older than 3.10; install a newer Python"
+  "$python" -m venv "$venv" || { rm -rf "$venv"; die "creating $venv failed"; }
 fi
 requirements="$root/engine/requirements.txt $root/teacher-ui/requirements.txt"
 stamp="$venv/.demo-requirements"
@@ -129,8 +134,15 @@ tunnel_url() { grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' "$logs/tunnel.lo
 has_tunnel_url() { [ -n "$(tunnel_url)" ]; }
 wait_for 30 "the tunnel address" has_tunnel_url
 url="$(tunnel_url)"
-# A new quick-tunnel name can take a few seconds to resolve
-wait_for 60 "the tunnel ($url)" curl -fs "$url/health"
+tunnel_registered() { grep -q "Registered tunnel connection" "$logs/tunnel.log"; }
+wait_for 30 "the tunnel connection" tunnel_registered
+# A new quick-tunnel name takes a few seconds to appear in DNS. Ask Cloudflare's resolver
+# directly: the system resolver caches the early "no such name" answer for minutes.
+doh=""
+curl --help all 2>/dev/null | grep -q -- --doh-url && doh="--doh-url https://1.1.1.1/dns-query"
+# shellcheck disable=SC2086
+tunnel_up() { curl -fs --max-time 5 $doh "$url/health"; }
+wait_for 60 "the tunnel ($url)" tunnel_up
 "$venv/bin/python" "$root/engine/point_agent.py" "$url/v1"
 
 if [ "$unreal" = 1 ]; then
