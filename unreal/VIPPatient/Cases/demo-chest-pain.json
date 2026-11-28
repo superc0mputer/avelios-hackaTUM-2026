@@ -1,0 +1,23 @@
+{
+  "_comment": "Demo case for the Unreal look only (#45): patient, mood, personality and the proposed 'presentation' field. Not a full teacher case.",
+  "case_id": "demo-chest-pain",
+  "character_id": "man-01",
+  "diagnosis": "Acute coronary syndrome (demo)",
+  "patient": {
+    "age": 58,
+    "gender": "male"
+  },
+  "personality": {
+    "type": "downplays_everything",
+    "mood": "fear"
+  },
+  "presentation": {
+    "pain": 6,
+    "breathing": "fast_shallow",
+    "discomfort": 0,
+    "visible_signs": [
+      "pale",
+      "sweaty"
+    ]
+  }
+}
