@@ -126,10 +126,14 @@ def test_stage_relays_audio_and_emotion_to_unreal():
     client, _ = make_client()
     with client.websocket_connect("/ws/unreal") as unreal:
         assert json.loads(unreal.receive_text()) == {"type": "emotion", "emotion": "neutral", "intensity": 0.6}
+        assert json.loads(unreal.receive_text()) == {"type": "viewers", "count": 0}
         with client.websocket_connect("/ws/stage") as stage:
             assert json.loads(stage.receive_text()) == {"type": "status", "unreal": 1}
             stage.send_text(json.dumps({"type": "audio", "sample_rate": 16000, "pcm_b64": "AAABAA=="}))
-            assert json.loads(unreal.receive_text()) == {"type": "audio", "sample_rate": 16000, "pcm_b64": "AAABAA=="}
+            assert json.loads(unreal.receive_text()) == {"type": "audio", "sample_rate": 16000, "pcm_b64": "AAABAA==", "audible": True}
+            # A tester elsewhere: the lips move, but the demo computer stays quiet
+            stage.send_text(json.dumps({"type": "audio", "pcm_b64": "AAABAA==", "audible": False}))
+            assert json.loads(unreal.receive_text())["audible"] is False
             stage.send_text(json.dumps({"type": "emotion", "emotion": "furious", "intensity": 3}))
             assert json.loads(unreal.receive_text()) == {"type": "emotion", "emotion": "neutral", "intensity": 2.0}
             stage.send_text(json.dumps({"type": "emotion", "emotion": "confusion", "intensity": 0.5}))
@@ -175,6 +179,7 @@ def test_director_sets_the_face_per_turn():
     client, _ = make_client(director=director)
     with client.websocket_connect("/ws/unreal") as unreal:
         unreal.receive_text()  # starting emotion
+        unreal.receive_text()  # video viewers
         client.post("/v1/chat/completions", json={"messages": history()})
         assert json.loads(unreal.receive_text()) == {"type": "state", "state": "thinking"}
         assert json.loads(unreal.receive_text()) == {
@@ -184,6 +189,43 @@ def test_director_sets_the_face_per_turn():
     assert case["case_id"] and turns[-1]["content"] == "Hello, what brings you in today?"
 
 
+def test_typed_turn_replies_in_character():
+    client, completions = make_client()
+    r = client.post("/turn", json={"messages": history()})
+    assert r.json() == {"reply": "Well... it's my chest."}
+    # Our patient prompt goes first; the caller's system message is dropped
+    assert [m["role"] for m in completions.calls[-1]["messages"]] == ["system", "user"]
+    assert client.post("/turn", json={"messages": history()}, headers={"cf-ray": "x"}).status_code == 403
+
+
+def test_teacher_routes_closed_through_tunnel(monkeypatch):
+    monkeypatch.setenv("PUBLIC_ACCESS_CODE", "letmein")
+    client, _ = make_client()
+    from voice_server import ACCESS_COOKIE, access_token
+
+    client.cookies.set(ACCESS_COOKIE, access_token("letmein"))
+    tunnel = {"cf-ray": "x"}
+    # The answer key stays home, even for testers with the code
+    assert client.get("/api/cases", headers=tunnel).status_code == 403
+    assert client.get("/api/case?case_id=case-001", headers=tunnel).status_code == 403
+    assert client.get("/api/practice-results", headers=tunnel).status_code == 403
+    assert client.post("/api/grade", json={}, headers=tunnel).status_code == 403
+
+
+def test_page_reported_turn_drives_the_face():
+    # The desktop app's agent calls OpenAI directly, so the page reports each student turn itself
+    director = FakeDirector()
+    client, completions = make_client(director=director)
+    with client.websocket_connect("/ws/unreal") as unreal:
+        unreal.receive_text()
+        unreal.receive_text()
+        assert client.post("/director", json={"messages": history()}).json()["director"] is True
+        assert json.loads(unreal.receive_text()) == {"type": "state", "state": "thinking"}
+        assert json.loads(unreal.receive_text())["emotion"] == "fear"
+    assert not completions.calls  # no patient reply is generated for it
+    assert client.post("/director", json={"messages": []}, headers={"cf-ray": "x"}).status_code == 403
+
+
 def test_websockets_closed_through_tunnel():
     from starlette.websockets import WebSocketDisconnect
 
@@ -191,3 +233,51 @@ def test_websockets_closed_through_tunnel():
     with pytest.raises(WebSocketDisconnect):
         with client.websocket_connect("/ws/unreal", headers={"cf-ray": "x"}) as ws:
             ws.receive_text()
+
+
+def test_video_frames_reach_viewers_and_unreal_knows_who_watches():
+    client, _ = make_client()
+    with client.websocket_connect("/ws/unreal") as unreal:
+        assert json.loads(unreal.receive_text())["type"] == "emotion"
+        assert json.loads(unreal.receive_text()) == {"type": "viewers", "count": 0}
+        with client.websocket_connect("/ws/video") as viewer:
+            assert json.loads(unreal.receive_text()) == {"type": "viewers", "count": 1}
+            unreal.send_bytes(b"\xff\xd8jpeg-1")
+            assert viewer.receive_bytes() == b"\xff\xd8jpeg-1"
+        # Nobody watches any more: Unreal can stop capturing
+        assert json.loads(unreal.receive_text()) == {"type": "viewers", "count": 0}
+
+
+def test_public_access_code(monkeypatch):
+    import httpx
+
+    from voice_server import ACCESS_COOKIE, access_token
+
+    client, _ = make_client()
+    client.app.state.teacher_transport = httpx.MockTransport(lambda req: httpx.Response(200, text="teacher " + req.url.path))
+    tunnel = {"cf-ray": "x"}
+    # Without PUBLIC_ACCESS_CODE the tunnel serves ElevenLabs only
+    monkeypatch.delenv("PUBLIC_ACCESS_CODE", raising=False)
+    assert client.get("/", headers=tunnel, follow_redirects=False).status_code == 403
+
+    monkeypatch.setenv("PUBLIC_ACCESS_CODE", "letmein")
+    first = client.get("/", headers=tunnel, follow_redirects=False)
+    assert first.status_code == 303 and first.headers["location"] == "/access"
+    assert client.post("/access", content="code=wrong", headers=tunnel).status_code == 401
+    ok = client.post("/access", content="code=letmein", headers=tunnel, follow_redirects=False)
+    assert ok.status_code == 303 and "letmein" not in ok.headers["set-cookie"]
+
+    allowed = {**tunnel, "cookie": f"{ACCESS_COOKIE}={access_token('letmein')}"}
+    page = client.get("/app.js", headers=allowed)
+    assert page.status_code == 200 and page.text == "teacher /app.js"
+    # The prompt holds the case's secrets: never public, not even with the code
+    assert client.get("/prompt", headers=allowed).status_code == 403
+    assert client.post("/case", json={"case_id": "case-001"}, headers=allowed).status_code == 403
+
+    from starlette.websockets import WebSocketDisconnect
+
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect("/ws/video", headers=tunnel) as ws:
+            ws.receive_bytes()
+    with client.websocket_connect("/ws/video", headers=allowed) as ws:
+        pass  # accepted with the code

@@ -93,10 +93,13 @@ foreach ($name in $patients) {
     Invoke-Stage "build_character" "Patient\Characters\MHC_$name.uasset" "build_character_$name"
     Invoke-Stage "assemble" "MetaHumans\MHC_$name\Face\SKM_MHC_${name}_FaceMesh.uasset" "assemble_$name"
 }
-# the room and patient table list every patient, so rebuild them when patients.json changes
+# the room and patient table list every patient, so rebuild them when patients.json or the room scripts change
 $room = Join-Path $content "Patient\ConsultationRoom.umap"
-if ((Test-Path $room) -and ((Get-Item $patientList).LastWriteTime -gt (Get-Item $room).LastWriteTime)) {
-    Remove-Item -Force $room
+foreach ($source in "patients.json", "build_scene.py", "office.py", "office_pack.py", "textures") {
+    $path = Join-Path $projectDir "Scripts\$source"
+    if ((Test-Path $room) -and (Test-Path $path) -and ((Get-Item $path).LastWriteTime -gt (Get-Item $room).LastWriteTime)) {
+        Remove-Item -Force $room
+    }
 }
 Invoke-Stage "build_scene" "Patient\ConsultationRoom.umap"
 

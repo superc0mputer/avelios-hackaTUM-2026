@@ -41,6 +41,9 @@ public:
 	/** Mono 16-bit samples at any rate. Speech given while talking is queued behind it. */
 	void Speak(const TArray<int16>& Samples, int32 SampleRate);
 
+	/** False: the lips move but this computer stays quiet (the voice plays in a tester's browser). */
+	void SetVoiceAudible(bool bAudible);
+
 	/**
 	 * One of the emotion names in the README; unknown values fall back to neutral. Intensity 0 to 2:
 	 * the face solver takes up to 1, our expression layer goes further so moods read at a distance.

@@ -3,173 +3,342 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#f5f8fa">
-    <title>VIP · Create a patient case</title>
+    <meta name="theme-color" content="#f3f6f8">
+    <title>VIP · Virtual Interview Patient</title>
     <link rel="stylesheet" href="/styles.css">
     <script src="/app.js" defer></script>
   </head>
   <body>
-    <header class="topbar">
-      <a class="brand" href="/" aria-label="VIP Case Studio home"><span class="brand-mark">V</span><span><strong>VIP</strong><small>Case Studio</small></span></a>
-      <div class="top-context"><i></i> Local authoring workspace</div>
-      <span class="top-tag">TEACHER TOOL</span>
+    <header class="topbar" id="topbar">
+      <a class="brand" href="/" aria-label="VIP home">
+        <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 21s-7-4.4-7-10.2A4.3 4.3 0 0 1 12 8a4.3 4.3 0 0 1 7 2.8C19 16.6 12 21 12 21Z"/><path d="M7.5 13h2.2l1.3-2.2 2 4 1.3-1.8h2.2"/></svg></span>
+        <span><strong>VIP</strong><small>Virtual Interview Patient</small></span>
+      </a>
+      <span class="topbar-spacer"></span>
+      <div class="role-switch" id="role-switch" role="group" aria-label="Role" hidden>
+        <button type="button" data-role="teacher" aria-pressed="false">Teacher</button>
+        <button type="button" data-role="student" aria-pressed="false">Student</button>
+      </div>
     </header>
 
-    <main class="page-shell">
-      <section class="page-heading">
-        <div class="hero-copy">
-          <p class="eyebrow">CASE AUTHORING</p>
-          <h1>Build a patient<br><span>students can learn from.</span></h1>
-          <p>Create a guided interview case, one step at a time.</p>
-        </div>
-      </section>
+    <!-- ============ landing ============ -->
+    <main class="landing" id="screen-landing" aria-labelledby="landing-title">
+      <div class="landing-hero">
+        <p class="eyebrow">Clinical interview practice</p>
+        <h1 id="landing-title">Talk to a patient.<br><span>Find the diagnosis.</span></h1>
+        <p>Students interview a lifelike virtual patient by voice. Teachers write the cases and review the findings.</p>
+      </div>
+      <div class="role-cards">
+        <button class="role-card" data-role="student" type="button">
+          <span class="role-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 4v5a5 5 0 0 0 10 0V4"/><path d="M4.5 4H6M13 4h1.5"/><path d="M9.5 14v1.5a4.5 4.5 0 0 0 9 0V13"/><circle cx="18.5" cy="11" r="2"/></svg></span>
+          <span><strong>I’m a student</strong><small>Choose a patient, take their history and submit your diagnosis.</small></span>
+          <span class="arrow" aria-hidden="true">→</span>
+        </button>
+        <button class="role-card" data-role="teacher" type="button">
+          <span class="role-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z"/><path d="M14 3v6h6M8 13h8M8 17h5"/></svg></span>
+          <span><strong>I’m a teacher</strong><small>Write patient cases and review your students’ interviews.</small></span>
+          <span class="arrow" aria-hidden="true">→</span>
+        </button>
+      </div>
+      <p class="landing-foot">No account needed. Everything stays on this computer.</p>
+    </main>
 
-      <section class="character-preview" aria-labelledby="character-title">
-        <div class="avatar-window" id="avatar-window" data-character-id="man-01" aria-label="Animated mock character preview">
-          <div class="avatar-art" aria-hidden="true">
-            <div class="avatar-hair"></div>
-            <div class="avatar-head"><i class="eye eye-left"></i><i class="eye eye-right"></i><i class="avatar-mouth"></i></div>
-            <div class="avatar-neck"></div><div class="avatar-body"></div>
+    <!-- ============ teacher ============ -->
+    <div class="shell" id="screen-teacher" hidden>
+      <nav class="sidenav" aria-label="Teacher">
+        <p class="sidenav-label">TEACHER</p>
+        <button type="button" data-view="library" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="4" width="7" height="7" rx="1.5"/><rect x="14" y="4" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>Case library</button>
+        <button type="button" data-view="builder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>New case</button>
+        <button type="button" data-view="responses"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16v11H8l-4 4Z"/><path d="M8 9h8M8 12h5"/></svg>Student responses<span class="count" id="response-count">0</span></button>
+      </nav>
+
+      <div>
+        <!-- case library -->
+        <section id="view-library" aria-labelledby="library-title">
+          <div class="view-head">
+            <div><p class="eyebrow">Case library</p><h1 id="library-title">Patient cases</h1><p>Every case students can choose from. Diagnoses are only shown to teachers.</p></div>
+            <button class="btn btn-primary" type="button" data-action="new-case"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>New case</button>
           </div>
-          <span class="preview-chip">CHARACTER PREVIEW</span>
-          <span class="preview-caption">MetaHuman preview</span>
-        </div>
-        <div class="character-details">
-          <p class="eyebrow">PATIENT APPEARANCE</p>
-          <h2 id="character-title">Man 01</h2>
-          <p class="character-copy">Choose one of the six demo characters. This animated placeholder will be replaced with your MetaHuman previews.</p>
-          <div class="character-options" id="character-options" role="group" aria-label="Choose a demo character"></div>
-          <input id="character-id" type="hidden" value="man-01">
-        </div>
-      </section>
+          <div class="section-title"><h2>Your cases</h2><span id="own-count"></span></div>
+          <div class="case-grid" id="own-cases"></div>
+          <div class="section-title"><h2>Preset cases</h2><span>Ready-made scenarios. Duplicate one to adapt it.</span></div>
+          <div class="case-grid" id="preset-cases"></div>
+        </section>
 
-      <div class="wizard-heading" id="wizard-heading">
-        <div class="wizard-count" id="wizard-count">STEP 1 OF 3</div>
-        <div class="wizard-title-row"><h2 id="wizard-title">Patient profile</h2><span id="wizard-hint">Start with the patient’s identity and diagnosis.</span></div>
-        <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
-        <nav class="step-labels" aria-label="Wizard progress">
-          <span class="step-label active" data-step-label="0">Patient</span>
-          <span class="step-label" data-step-label="1">Personality</span>
-          <span class="step-label" data-step-label="2">Condition</span>
-          <span class="step-label" data-step-label="3">Clinical facts</span>
-        </nav>
+        <!-- builder -->
+        <section id="view-builder" hidden aria-labelledby="builder-title">
+          <div class="view-head">
+            <div><p class="eyebrow" id="builder-eyebrow">New case</p><h1 id="builder-title">Build a patient</h1><p id="builder-sub">Four short steps. Students only ever see the name, age and face.</p></div>
+            <button class="btn" type="button" data-action="back-to-library">Back to library</button>
+          </div>
+          <div class="preset-banner" id="preset-banner" hidden>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+            <span>This is a preset case and can’t be changed. Duplicate it to make your own version.</span>
+          </div>
+          <div class="builder">
+            <form id="case-form" novalidate>
+              <nav class="stepper" aria-label="Case steps">
+                <button class="step-tab" type="button" data-goto="0"><small>STEP 1</small><span>Patient</span></button>
+                <button class="step-tab" type="button" data-goto="1"><small>STEP 2</small><span>Personality</span></button>
+                <button class="step-tab" type="button" data-goto="2"><small>STEP 3</small><span>Condition</span></button>
+                <button class="step-tab" type="button" data-goto="3"><small>STEP 4</small><span>Clinical facts</span></button>
+              </nav>
+
+              <fieldset class="card step-panel" data-step="0">
+                <h2>Who is the patient?</h2>
+                <p class="intro">The diagnosis stays with you. The patient never says it, and students never see it before they submit.</p>
+                <div class="grid three">
+                  <label class="field"><span>Name <b>*</b></span><input id="name" required autocomplete="off" placeholder="Full name"></label>
+                  <label class="field"><span>Age <b>*</b></span><input id="age" type="number" min="18" max="110" required placeholder="58"></label>
+                  <label class="field"><span>Gender <b>*</b></span><select id="gender" required>
+                    <option value="male">Man</option><option value="female">Woman</option><option value="non_binary">Non-binary</option><option value="other">Self-describe</option>
+                  </select></label>
+                  <label class="field full" id="gender-other-wrap" hidden><span>Gender description <b>*</b></span><input id="gender-other" placeholder="Describe the patient’s gender"></label>
+                  <label class="field full"><span>Life story <b>*</b></span><textarea id="life-story" required rows="3" placeholder="Work, family, routines and experiences that shape this patient"></textarea></label>
+                  <label class="field full"><span>Diagnosis <b>*</b> <small>· teacher only</small></span><input id="diagnosis" required autocomplete="off" placeholder="e.g. Stable angina"></label>
+                </div>
+                <div class="fieldset">
+                  <p class="field-hint" style="margin-bottom:8px"><strong style="color:var(--ink-2)">Face</strong> · the 3D patient students meet. Faces far from the patient’s age are dimmed.</p>
+                  <div class="face-grid" id="face-grid" role="group" aria-label="Choose the patient’s face"></div>
+                </div>
+              </fieldset>
+
+              <fieldset class="card step-panel" data-step="1" hidden>
+                <h2>How do they come across?</h2>
+                <p class="intro">Personality decides how readily the patient shares, especially the secrets.</p>
+                <div class="grid two">
+                  <label class="field"><span>Personality <b>*</b></span><select id="personality-type" required>
+                    <option value="no_preference">Ordinary, cooperative</option>
+                    <option value="downplays_everything">Minimizing, downplays everything</option>
+                    <option value="anxious_talkative">Anxious and talkative</option>
+                    <option value="shy_reserved">Shy and reserved</option>
+                    <option value="assertive">Assertive</option>
+                    <option value="distrustful">Distrustful</option>
+                    <option value="custom">Custom</option>
+                  </select></label>
+                  <label class="field"><span>Starting mood <b>*</b></span><select id="mood" required>
+                    <option value="neutral">Neutral</option><option value="sad">Sad</option><option value="fear">Scared</option><option value="anger">Angry</option><option value="confusion">Confused</option><option value="boredom">Flat, bored</option><option value="happy">Cheerful</option><option value="surprise">Unsettled</option><option value="disgust">Irritated</option><option value="confidence">Confident</option><option value="excitement">Keyed up</option><option value="playfulness">Joking</option>
+                  </select></label>
+                  <label class="field full"><span>Personality detail <small id="description-optional">(optional)</small></span><textarea id="personality-description" rows="3" placeholder="How the patient reacts, talks and relates to their story"></textarea></label>
+                </div>
+                <div class="hint-box"><span>How this patient shares information</span><strong id="mapping-copy"></strong></div>
+              </fieldset>
+
+              <fieldset class="card step-panel" data-step="2" hidden>
+                <h2>How does the illness show?</h2>
+                <p class="intro">What students see on the 3D patient. Leave it for a patient who looks well. During the talk the face can show more, never less.</p>
+                <div class="grid three">
+                  <div class="field"><span>Pain</span>
+                    <span class="range-row"><input id="pain" type="range" min="0" max="10" step="1" value="0" aria-label="Pain from 0 to 10"><output id="pain-out" for="pain">0/10</output></span>
+                  </div>
+                  <label class="field"><span>Breathing</span><select id="breathing">
+                    <option value="">Normal</option><option value="fast_shallow">Fast and shallow</option><option value="laboured">Laboured</option><option value="slow_deep">Slow and deep</option>
+                  </select></label>
+                  <label class="field"><span>Unease at the start</span><select id="discomfort">
+                    <option value="">None</option><option value="0.3">A little</option><option value="0.6">Clearly uneasy</option><option value="0.9">Very uneasy</option>
+                  </select></label>
+                </div>
+                <fieldset class="fieldset">
+                  <legend>Visible signs</legend>
+                  <div class="toggle-list" id="visible-signs">
+                    <label><input type="checkbox" value="pale"> Pale</label>
+                    <label><input type="checkbox" value="sweaty"> Sweaty</label>
+                    <label><input type="checkbox" value="jaundice"> Yellow skin (jaundice)</label>
+                    <label><input type="checkbox" value="cyanosis"> Bluish skin (cyanosis)</label>
+                    <label><input type="checkbox" value="tired"> Tired</label>
+                    <label><input type="checkbox" value="flushed"> Flushed</label>
+                    <label><input type="checkbox" value="red_eyes"> Red eyes</label>
+                  </div>
+                </fieldset>
+              </fieldset>
+
+              <fieldset class="card step-panel" data-step="3" hidden>
+                <h2>What does the patient know?</h2>
+                <p class="intro">One fact per line. The first symptom is what the patient opens with; everything else comes only when asked.</p>
+                <label class="field"><span>Symptoms <b>*</b></span><textarea id="symptoms" required rows="4" placeholder="Chest pressure for three months&#10;Comes on with brisk walking and eases with rest"></textarea></label>
+                <div class="grid two" style="margin-top:16px">
+                  <label class="field"><span>Medical history</span><textarea id="medical-history" rows="2" placeholder="High blood pressure"></textarea></label>
+                  <label class="field"><span>Medication</span><textarea id="medications" rows="2" placeholder="Amlodipine 5 mg daily"></textarea></label>
+                  <label class="field"><span>Allergies</span><textarea id="allergies" rows="2" placeholder="No known allergies"></textarea></label>
+                  <label class="field"><span>Family history</span><textarea id="family-history" rows="2" placeholder="Father had a heart attack at 60"></textarea></label>
+                  <label class="field"><span>Lifestyle</span><textarea id="lifestyle" rows="2" placeholder="Work, activity, smoking, alcohol"></textarea></label>
+                  <label class="field secret-field"><span>Secrets <small>· shared only with trust and good questions</small></span><textarea id="secrets" rows="2" placeholder="Smokes 20 a day but tells people he quit"></textarea></label>
+                </div>
+              </fieldset>
+
+              <div class="builder-foot">
+                <span class="status" id="builder-status" role="status" aria-live="polite"></span>
+                <button class="btn" id="back-button" type="button">Back</button>
+                <button class="btn btn-primary" id="next-button" type="button">Continue</button>
+                <button class="btn btn-primary" id="save-button" type="submit" hidden>Save case</button>
+                <button class="btn btn-primary" id="duplicate-button" type="button" hidden>Duplicate to edit</button>
+              </div>
+            </form>
+
+            <aside class="card summary" aria-label="Case summary">
+              <div class="summary-head"><span class="portrait" id="summary-portrait"></span><div><h3 id="summary-name">New patient</h3><p id="summary-meta">Age and gender</p></div></div>
+              <dl>
+                <div><dt>Diagnosis</dt><dd id="summary-dx">—</dd></div>
+                <div><dt>Personality</dt><dd id="summary-personality">—</dd></div>
+                <div><dt>Condition</dt><dd id="summary-condition">Looks well</dd></div>
+                <div><dt>Facts</dt><dd id="summary-facts">—</dd></div>
+              </dl>
+            </aside>
+          </div>
+        </section>
+
+        <!-- responses -->
+        <section id="view-responses" hidden aria-labelledby="responses-title">
+          <div class="view-head"><div><p class="eyebrow">Review</p><h1 id="responses-title">Student responses</h1><p>Read each interview, compare it with the case and leave a grade.</p></div></div>
+          <div class="stats">
+            <div class="card stat"><span>Responses</span><strong id="stat-responses">0</strong></div>
+            <div class="card stat"><span>Awaiting review</span><strong id="stat-ungraded">0</strong></div>
+            <div class="card stat"><span>Patient cases</span><strong id="stat-cases">0</strong></div>
+          </div>
+          <div class="review-layout">
+            <div class="card response-list" id="response-list" role="listbox" aria-label="Submissions"></div>
+            <div class="card grading">
+              <div class="empty" id="grading-empty" style="border:0"><h2>Select a response</h2><p>Pick an interview on the left to review it.</p></div>
+              <form id="grading-form" hidden>
+                <input type="hidden" id="grading-submission-id">
+                <p class="eyebrow" id="grading-case"></p>
+                <h2 id="grading-student"></h2>
+                <p class="muted" id="grading-when"></p>
+                <div class="answer-compare">
+                  <div class="answer"><span>Student’s diagnosis</span><p id="review-disease"></p></div>
+                  <div class="answer key"><span>Case diagnosis</span><p id="review-correct"></p></div>
+                </div>
+                <div class="read-block"><span>Symptoms found</span><p id="review-symptoms"></p></div>
+                <div class="read-block"><span>Notes and reasoning</span><p id="review-notes"></p></div>
+                <details class="transcript" id="review-transcript-wrap"><summary>Interview transcript</summary><div class="transcript-list" id="review-transcript"></div></details>
+                <div class="grade-row">
+                  <label class="field"><span>Grade</span><select id="teacher-grade" required><option value="">Choose</option><option value="1">1 · Excellent</option><option value="2">2 · Good</option><option value="3">3 · Satisfactory</option><option value="4">4 · Sufficient</option><option value="5">5 · Insufficient</option></select></label>
+                  <label class="field"><span>Feedback for the student</span><textarea id="teacher-feedback" rows="3" placeholder="Clinical reasoning, questioning, communication"></textarea></label>
+                </div>
+                <div style="display:flex;justify-content:flex-end;margin-top:16px"><button class="btn btn-primary" id="save-grade-button" type="submit">Save review</button></div>
+              </form>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <!-- ============ student: choose a patient ============ -->
+    <main class="page" id="screen-student" hidden aria-labelledby="student-title">
+      <div class="student-head">
+        <div><p class="eyebrow">Practice</p><h1 id="student-title">Choose a patient</h1><p>Take a history, then submit what you think is going on.</p></div>
+        <label class="field name-entry"><span>Your name or student ID</span><input id="student-display-name" autocomplete="name" placeholder="e.g. Alex Weber"></label>
+      </div>
+      <div class="patient-grid" id="patient-grid"></div>
+    </main>
+
+    <!-- ============ student: briefing ============ -->
+    <main class="briefing" id="screen-briefing" hidden aria-labelledby="briefing-title">
+      <div class="briefing-top">
+        <button class="btn btn-ghost" type="button" data-action="to-patients">← All patients</button>
+        <div class="timer"><span>Reading time</span><strong id="briefing-timer">02:00</strong></div>
+      </div>
+      <article class="card briefing-card">
+        <p class="eyebrow">Briefing</p>
+        <h1 id="briefing-title">Your next patient</h1>
+        <div class="briefing-patient"><span class="portrait" id="briefing-portrait"></span><div><h2 id="briefing-name"></h2><p class="muted" id="briefing-meta"></p></div></div>
+        <ul class="briefing-tips">
+          <li>Introduce yourself and ask what brings them in. The patient waits for you to speak first.</li>
+          <li>Details come out only when you ask. Some things need trust before the patient shares them.</li>
+          <li>You have 10 minutes. Note what you find; you submit your diagnosis at the end.</li>
+        </ul>
+        <div class="briefing-foot"><span>The interview starts automatically when reading time ends.</span><button class="btn btn-primary btn-lg" id="begin-interview-button" type="button">Start interview</button></div>
+      </article>
+    </main>
+
+    <!-- ============ student: the consultation ============ -->
+    <section class="consult" id="screen-consult" hidden aria-label="Patient interview" data-state="connecting">
+      <div class="stage" id="stage" data-mode="connecting">
+        <canvas id="stage-video" aria-hidden="true"></canvas>
+        <div class="stage-center">
+          <div class="voice-orb"><span class="portrait" id="stage-portrait"></span></div>
+          <h2 id="stage-title">Bringing in the patient…</h2>
+          <span class="stage-note"><i></i><span id="stage-note">Preparing the consultation room</span></span>
+          <p class="stage-error" id="stage-error" hidden></p>
+          <button class="btn btn-glass" id="retry-button" type="button" hidden>Try again</button>
+        </div>
       </div>
 
-      <form id="case-form" novalidate>
-        <section class="card section wizard-step" data-step="0" aria-labelledby="step-patient-title">
-          <h2 id="step-patient-title">Who is the patient?</h2>
-          <p class="section-intro">The diagnosis is private to the teacher. Students will work it out through the conversation.</p>
-          <div class="grid three">
-            <label class="field"><span>Name <b>*</b></span><input id="name" required placeholder="Full name"></label>
-            <label class="field"><span>Age <b>*</b></span><input id="age" type="number" min="18" max="110" required placeholder="58"></label>
-            <label class="field"><span>Gender <b>*</b></span><select id="gender" required>
-              <option value="male">Man</option><option value="female">Woman</option><option value="non_binary">Non-binary</option><option value="other">Self-describe</option>
-            </select></label>
-            <label class="field full" id="gender-other-wrap" hidden><span>Gender description <b>*</b></span><input id="gender-other" placeholder="Describe the patient's gender"></label>
-            <label class="field full"><span>Life story <b>*</b></span><textarea id="life-story" required rows="3" placeholder="Work, relationships, routines, and experiences that shape this patient"></textarea></label>
-            <label class="field full"><span>Likely diagnosis <b>*</b></span><input id="diagnosis" required placeholder="e.g. stable angina"></label>
-          </div>
-        </section>
-
-        <section class="card section wizard-step" data-step="1" aria-labelledby="step-personality-title" hidden>
-          <h2 id="step-personality-title">How should the patient come across?</h2>
-          <p class="section-intro">Personality shapes how the patient responds and how readily they share difficult facts.</p>
-          <div class="grid two">
-            <label class="field"><span>Personality <b>*</b></span><select id="personality-type" required>
-              <option value="no_preference" selected>No preference (ordinary patient)</option>
-              <option value="downplays_everything">Downplays everything</option>
-              <option value="anxious_talkative">Anxious and talkative</option>
-              <option value="shy_reserved">Shy and reserved</option>
-              <option value="assertive">Assertive</option>
-              <option value="distrustful">Distrustful</option>
-              <option value="custom">Custom</option>
-            </select></label>
-            <label class="field"><span>Starting mood <b>*</b></span><select id="mood" required>
-              <option value="neutral">Neutral</option><option value="happy">Happy</option><option value="sad">Sad</option><option value="fear">Fear</option><option value="disgust">Disgust</option><option value="anger">Anger</option><option value="surprise">Surprise</option>
-              <option value="boredom">Bored</option><option value="confidence">Confident</option><option value="confusion">Confused</option><option value="excitement">Excited</option><option value="playfulness">Playful</option>
-            </select></label>
-            <label class="field full"><span>Personality detail <small>(optional)</small></span><textarea id="personality-description" rows="3" placeholder="How the patient reacts, communicates, and relates to their life story"></textarea></label>
-          </div>
-          <div class="mapping-note"><span>Disclosure style for this personality</span><strong id="mapping-copy">Minimizes at first; secrets emerge after specific, respectful follow-up.</strong></div>
-        </section>
-
-        <section class="card section wizard-step" data-step="2" aria-labelledby="step-condition-title" hidden>
-          <h2 id="step-condition-title">How does the illness show?</h2>
-          <p class="section-intro">What the student sees on the MetaHuman before and during the interview. All optional; leave it for a patient who looks well. The face can show more during the conversation, never less.</p>
-          <div class="grid three">
-            <label class="field"><span>Pain <small>(0 to 10)</small></span><input id="pain" type="number" min="0" max="10" step="1" placeholder="0"></label>
-            <label class="field"><span>Breathing</span><select id="breathing">
-              <option value="">Normal</option>
-              <option value="fast_shallow">Fast and shallow</option>
-              <option value="laboured">Laboured, with the shoulders</option>
-              <option value="slow_deep">Slow and deep</option>
-            </select></label>
-            <label class="field"><span>Unease at the start</span><select id="discomfort">
-              <option value="">None</option>
-              <option value="0.3">A little</option>
-              <option value="0.6">Clearly uneasy</option>
-              <option value="0.9">Very uneasy</option>
-            </select></label>
-          </div>
-          <fieldset class="field sign-options">
-            <span>Visible signs</span>
-            <div class="sign-list" id="visible-signs">
-              <label><input type="checkbox" value="pale"> Pale</label>
-              <label><input type="checkbox" value="jaundice"> Jaundice (yellow skin and eyes)</label>
-              <label><input type="checkbox" value="cyanosis"> Cyanosis (bluish-grey skin)</label>
-              <label><input type="checkbox" value="flushed"> Flushed</label>
-              <label><input type="checkbox" value="sweaty"> Sweaty</label>
-              <label><input type="checkbox" value="red_eyes"> Red eyes</label>
-              <label><input type="checkbox" value="tired"> Tired</label>
-            </div>
-          </fieldset>
-        </section>
-
-        <section class="card section wizard-step" data-step="3" aria-labelledby="step-facts-title" hidden>
-          <h2 id="step-facts-title">What does the patient know?</h2>
-          <p class="section-intro">Add one fact per line. Secrets are true facts the patient shares reluctantly.</p>
-          <label class="field"><span>Symptoms <b>*</b></span><textarea id="symptoms" required rows="4" placeholder="Chest pressure for three months&#10;Triggered by brisk walking and eases with rest"></textarea></label>
-          <div class="grid two compact-grid">
-            <label class="field"><span>Medical history</span><textarea id="medical-history" rows="2" placeholder="High blood pressure"></textarea></label>
-            <label class="field"><span>Medication</span><textarea id="medications" rows="2" placeholder="Amlodipine"></textarea></label>
-            <label class="field"><span>Allergies</span><textarea id="allergies" rows="2" placeholder="No known medication allergies"></textarea></label>
-            <label class="field"><span>Family history</span><textarea id="family-history" rows="2" placeholder="Father had a heart attack"></textarea></label>
-            <label class="field"><span>Lifestyle</span><textarea id="lifestyle" rows="2" placeholder="Home, work, activity, smoking, alcohol"></textarea></label>
-            <label class="field"><span>Secrets</span><textarea id="secrets" rows="2" placeholder="Smokes 20 cigarettes a day; reluctant to disclose"></textarea></label>
-          </div>
-        </section>
-
-        <div class="form-footer">
-          <span id="status" role="status" aria-live="polite"></span>
-          <div class="wizard-actions">
-            <button class="back-button" id="back-button" type="button" hidden>← Back</button>
-            <button class="save-button" id="next-button" type="button">Continue <span>→</span></button>
-            <button class="save-button" id="save-button" type="submit" hidden>Validate &amp; save <span>✓</span></button>
-            <button class="save-button" id="start-button" type="button" hidden>Start conversation <span>→</span></button>
-          </div>
+      <header class="consult-bar">
+        <div class="consult-patient"><span class="portrait" id="consult-portrait"></span><div><strong id="consult-name"></strong><span id="consult-meta"></span></div></div>
+        <div class="status-pill" role="status" aria-live="polite"><i></i><span id="status-label">Preparing</span></div>
+        <div class="consult-actions">
+          <div class="timer" id="interview-timer-wrap"><span>Time left</span><strong id="interview-timer">10:00</strong></div>
+          <button class="btn btn-glass" id="notes-toggle" type="button" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 4h10l4 4v12H5Z"/><path d="M9 12h6M9 16h4"/></svg><span class="btn-label">Notes</span></button>
+          <button class="btn btn-end" id="end-interview-button" type="button">End interview</button>
         </div>
-      </form>
+      </header>
 
-      <section class="card conversation-panel" id="conversation-panel" hidden aria-labelledby="conversation-title">
-        <div class="conversation-head">
-          <div>
-            <p class="eyebrow">LIVE INTERVIEW</p>
-            <h2 id="conversation-title">Talk to the patient</h2>
-            <p class="section-intro" id="conversation-patient"></p>
-          </div>
-          <span class="conversation-state" id="conversation-state" data-state="idle">Not connected</span>
+      <div class="captions" id="captions" aria-live="polite"></div>
+
+      <div class="dock">
+        <p class="dock-note" id="dock-note"></p>
+        <div class="dock-row">
+          <button class="mic" id="mic-button" type="button" disabled><span class="mic-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></span><span id="mic-label">Start talking</span></button>
+          <form class="type-form" id="type-form" hidden><input id="type-input" autocomplete="off" placeholder="Type your question…" aria-label="Your question"><button class="btn btn-primary" type="submit">Send</button></form>
+          <button class="icon-btn" id="type-toggle" type="button" aria-pressed="false" title="Type instead of speaking" aria-label="Type instead of speaking"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M7 14h10"/></svg></button>
+          <button class="icon-btn" id="captions-toggle" type="button" aria-pressed="true" title="Captions on (click to hide)" aria-label="Hide captions"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10 10.5a2 2 0 1 0 0 3M17 10.5a2 2 0 1 0 0 3"/></svg></button>
         </div>
-        <div class="conversation-log" id="conversation-log" aria-live="polite">
-          <p class="conversation-empty">Click <b>Start talking</b>, allow the microphone and greet the patient. The patient waits for you to speak first.</p>
+      </div>
+
+      <aside class="drawer" id="notes-drawer" aria-labelledby="notes-title">
+        <div class="drawer-head"><h2 id="notes-title">Your notes</h2><button class="btn btn-ghost btn-sm" id="notes-close" type="button">Close</button></div>
+        <div class="drawer-body" id="notes-slot">
+          <p class="intro">Write as you go. You confirm and submit these when you end the interview.</p>
+          <form class="notes-form" id="notes-form" novalidate>
+            <label class="field"><span>Likely diagnosis <b>*</b></span><input id="student-diagnosis" required autocomplete="off" placeholder="What do you think the patient has?"></label>
+            <label class="field"><span>Symptoms found <b>*</b></span><textarea id="student-symptoms" required rows="5" placeholder="What did the patient tell you?"></textarea></label>
+            <label class="field"><span>Reasoning <small>(optional)</small></span><textarea id="student-notes" rows="5" placeholder="Why do you think so? What else could it be?"></textarea></label>
+          </form>
         </div>
-        <div class="conversation-actions">
-          <button class="save-button" id="talk-button" type="button">Start talking</button>
-          <button class="back-button" id="end-button" type="button" hidden>End conversation</button>
-          <a class="conversation-link" id="talk-link" target="_blank" rel="noopener">Open in ElevenLabs instead</a>
+      </aside>
+    </section>
+
+    <!-- ============ student: wrap-up ============ -->
+    <main class="narrow" id="screen-wrapup" hidden aria-labelledby="wrapup-title">
+      <article class="card wrap-card">
+        <p class="eyebrow">Interview ended</p>
+        <h1 id="wrapup-title">Submit your findings</h1>
+        <p class="intro">Check your notes and give your most likely diagnosis. After submitting you’ll see the case diagnosis.</p>
+        <div id="wrapup-slot"></div>
+        <div style="display:flex;justify-content:space-between;gap:12px;margin-top:22px;align-items:center">
+          <span class="muted" id="wrapup-note"></span>
+          <button class="btn btn-primary btn-lg" id="submit-findings" type="button">Submit findings</button>
         </div>
-        <p class="conversation-note" id="conversation-note"></p>
-      </section>
-      <div class="toast" id="toast" role="status" aria-live="polite"></div>
+      </article>
     </main>
+
+    <!-- ============ student: review ============ -->
+    <main class="narrow" id="screen-review" hidden aria-labelledby="review-title">
+      <article class="card review-card">
+        <p class="eyebrow" id="review-eyebrow">Review</p>
+        <h1 id="review-title">How did you do?</h1>
+        <p class="intro" id="review-intro"></p>
+        <div class="answer-compare">
+          <div class="answer"><span>Your diagnosis</span><p id="mine-diagnosis"></p></div>
+          <div class="answer key"><span>Case diagnosis</span><p id="mine-correct"></p></div>
+        </div>
+        <div class="verdict" id="mine-verdict"></div>
+        <div class="read-block"><span>Symptoms you found</span><p id="mine-symptoms"></p></div>
+        <div class="read-block" id="mine-notes-wrap"><span>Your reasoning</span><p id="mine-notes"></p></div>
+        <div class="read-block" id="mine-feedback-wrap" hidden><span>Teacher feedback</span><p id="mine-feedback"></p></div>
+        <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:24px">
+          <button class="btn btn-primary" type="button" data-action="to-patients">Back to patients</button>
+        </div>
+      </article>
+    </main>
+
+    <dialog class="modal" id="confirm-dialog">
+      <form method="dialog">
+        <div class="modal-body"><h2 id="confirm-title"></h2><p id="confirm-body"></p></div>
+        <div class="modal-actions" id="confirm-actions"></div>
+      </form>
+    </dialog>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
   </body>
 </html>

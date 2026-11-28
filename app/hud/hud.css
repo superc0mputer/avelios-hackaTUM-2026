@@ -1,0 +1,7 @@
+/* The desktop app's additions to the website's look. Loaded after teacher-ui/static/styles.css, only by
+   app/hud/page_server.py. The interview layout itself (the live patient full screen, controls around the
+   face, voice-only fallback) is part of the website now, so the app and the website look the same. */
+
+.vip-hud body { user-select: none; }
+.vip-hud :is(input, textarea, [contenteditable]) { user-select: text; }
+.vip-hud #hud-keys { width: min(560px, calc(100vw - 32px)); }
