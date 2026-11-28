@@ -32,11 +32,13 @@ from typing import Any
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
+from openai import OpenAI
 
 from case_adapter import load_patient_config
 from llm_client import ChatActorClient, LLMClientError
 from models import PatientConfig
 from prompt_builder import build_system_prompt
+from state_manager import StateManager
 
 load_dotenv()
 log = logging.getLogger("voice_server")
@@ -93,22 +95,36 @@ class StageHub:
 
 
 class PatientSession:
-    """The loaded case, its system prompt and the OpenAI client."""
+    """The loaded case, its system prompt, live state manager and the OpenAI client."""
 
     def __init__(self, client_factory: Callable[[str], ChatActorClient] | None = None) -> None:
         self._client_factory = client_factory or (lambda prompt: ChatActorClient(prompt))
         self.case_path: Path | None = None
         self.config: PatientConfig | None = None
         self.client: ChatActorClient | None = None
+        self.state_manager: StateManager | None = None
         self.mood = "neutral"
+
+    def current_system_prompt(self) -> str:
+        """Build the system prompt reflecting the current live conversation state."""
+        if self.config is None:
+            raise RuntimeError("No case loaded.")
+        state = self.state_manager.state if self.state_manager is not None else None
+        return build_system_prompt(self.config, state=state)
 
     def load(self, source: Path | dict[str, Any]) -> None:
         """Load a case (engine format or teacher-UI format) from a path or a dict."""
         data = source if isinstance(source, dict) else json.loads(Path(source).read_text(encoding="utf-8"))
         config = load_patient_config(data)
         self.mood = str((data.get("personality") or {}).get("mood") or "neutral")
-        prompt = build_system_prompt(config)
+        self.state_manager = StateManager(config)
+        prompt = build_system_prompt(config, state=self.state_manager.state)
         self.client = self._client_factory(prompt)
+        if isinstance(self.client.raw_client, OpenAI):
+            self.state_manager.set_llm_client(
+                self.client.raw_client,
+                model=os.getenv("OPENAI_STATE_MODEL") or self.client.model,
+            )
         self.config = config
         self.case_path = source if isinstance(source, Path) else None
         log.info("loaded case %s (%s) with model %s", config.case_id, config.demographics.full_name, self.client.model)
@@ -278,17 +294,44 @@ def create_app(session: PatientSession | None = None, *, load_case: bool = True)
     @app.get("/prompt", response_class=PlainTextResponse)
     def prompt() -> str:
         s: PatientSession = app.state.session
-        if s.client is None:
+        if s.client is None or s.config is None:
             raise HTTPException(503, "no case loaded")
-        return s.client.system_prompt
+        return s.current_system_prompt()
+
+    @app.get("/state")
+    def get_state() -> dict[str, Any]:
+        s: PatientSession = app.state.session
+        if s.client is None or s.config is None or s.state_manager is None:
+            raise HTTPException(503, "no case loaded")
+        return {
+            "case_id": s.config.case_id,
+            "tier3_secret_count": len(s.config.information_tiers.gated_secrets),
+            **s.state_manager.state.model_dump(),
+        }
+
+    @app.post("/state/reset")
+    def reset_state() -> dict[str, Any]:
+        s: PatientSession = app.state.session
+        if s.client is None or s.config is None or s.state_manager is None:
+            raise HTTPException(503, "no case loaded")
+        s.state_manager.reset()
+        s.client.update_system_prompt(s.current_system_prompt())
+        return {
+            "case_id": s.config.case_id,
+            "tier3_secret_count": len(s.config.information_tiers.gated_secrets),
+            **s.state_manager.state.model_dump(),
+        }
 
     @app.post("/v1/chat/completions")
     async def chat_completions(request: Request):
         s: PatientSession = app.state.session
-        if s.client is None:
+        if s.client is None or s.config is None:
             raise HTTPException(503, "no case loaded")
         body = await request.json()
         history = [m for m in body.get("messages", []) if isinstance(m, dict)]
+        if s.state_manager is not None:
+            s.state_manager.sync_from_history(history)
+        dynamic_prompt = s.current_system_prompt()
         stream = bool(body.get("stream"))
         completion_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
         created = int(time.time())
@@ -299,7 +342,7 @@ def create_app(session: PatientSession | None = None, *, load_case: bool = True)
             first = None
             parts: list[str] = []
             try:
-                for piece in s.client.stream_reply(history):
+                for piece in s.client.stream_reply(history, system_prompt=dynamic_prompt):
                     if first is None:
                         first = time.perf_counter()
                     parts.append(piece)
@@ -312,10 +355,20 @@ def create_app(session: PatientSession | None = None, *, load_case: bool = True)
             finally:
                 end = time.perf_counter()
                 ttft = (first - t0) * 1000 if first else None
+                reply_text = "".join(parts)
+                if s.state_manager is not None:
+                    s.state_manager.record_streamed_reply(reply_text)
                 student = next((m.get("content") for m in reversed(history) if m.get("role") == "user"), "")
+                state_info = ""
+                if s.state_manager is not None:
+                    st = s.state_manager.state
+                    state_info = (
+                        f" | trust={st.trust_score}/{st.unlock_threshold} "
+                        f"tier3={st.tier3_unlocked} stance={st.emotional_stance}"
+                    )
                 log.info(
-                    "turn: ttft=%s total=%.0fms | student: %.60s | patient: %.80s",
-                    f"{ttft:.0f}ms" if ttft is not None else "-", (end - t0) * 1000, student, "".join(parts),
+                    "turn: ttft=%s total=%.0fms%s | student: %.60s | patient: %.80s",
+                    f"{ttft:.0f}ms" if ttft is not None else "-", (end - t0) * 1000, state_info, student, reply_text,
                 )
 
         if not stream:
