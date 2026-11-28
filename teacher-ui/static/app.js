@@ -262,25 +262,32 @@ function addBubble(role, text, responseId) {
   log.scrollTop = log.scrollHeight;
 }
 
-$('#start-button').addEventListener('click', async () => {
-  if (!savedCaseId) return;
-  const button = $('#start-button');
+// The packaged app: the agent lives in the user's ElevenLabs account and is reached by signed URL.
+let liveSigned = false;
+
+async function startCase(caseId, button) {
+  if (!caseId) return;
   button.disabled = true;
   $('#status').textContent = 'Loading the patient…';
   try {
     const response = await fetch('/api/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ case_id: savedCaseId }),
+      body: JSON.stringify({ case_id: caseId }),
     });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || 'Could not start the conversation.');
     liveAgentId = result.agent_id;
+    liveSigned = Boolean(result.signed);
     $('#status').textContent = 'Live now: ' + result.name + ', ' + result.age;
     $('#conversation-patient').textContent = 'Live now: ' + result.name + ', ' + result.age;
     $('#talk-link').href = result.talk_url || '#';
     $('#talk-link').hidden = !result.talk_url;
-    $('#conversation-note').textContent = liveAgentId ? '' : 'Set ELEVENLABS_AGENT_ID in engine/.env to talk in the browser.';
+    let note = '';
+    if (result.voice_error) note = 'Voice setup problem: ' + result.voice_error;
+    else if (liveSigned && !liveAgentId) note = 'Add your ElevenLabs key under API KEYS to talk.';
+    else if (!liveAgentId) note = 'Set ELEVENLABS_AGENT_ID in engine/.env to talk in the browser.';
+    $('#conversation-note').textContent = note;
     $('#conversation-panel').hidden = false;
     $('#conversation-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
   } catch (error) {
@@ -289,7 +296,106 @@ $('#start-button').addEventListener('click', async () => {
   } finally {
     button.disabled = false;
   }
+}
+
+$('#start-button').addEventListener('click', () => startCase(savedCaseId, $('#start-button')));
+$('#example-start').addEventListener('click', () => startCase($('#example-case').value, $('#example-start')));
+
+// ---- API keys (packaged app): the user's own OpenAI and ElevenLabs keys ----
+function showKeyState(status) {
+  $('#openai-key-state').textContent = status.openai ? 'Saved on this computer.' : '';
+  $('#elevenlabs-key-state').textContent = status.elevenlabs ? 'Saved on this computer.' : '';
+  $('#examples-panel').hidden = !status.ready;
+}
+
+async function loadExamples() {
+  try {
+    const response = await fetch('/api/examples');
+    if (!response.ok) return;
+    const { cases, loaded } = await response.json();
+    const select = $('#example-case');
+    select.replaceChildren();
+    for (const item of cases || []) {
+      if (item.error) continue;
+      const option = document.createElement('option');
+      option.value = item.case_id;
+      option.textContent = item.name + (item.age ? ', ' + item.age : '') + ' (' + item.case_id + ')';
+      option.selected = item.case_id === loaded;
+      select.appendChild(option);
+    }
+  } catch (error) { /* the case list is optional */ }
+}
+
+async function loadKeyStatus() {
+  try {
+    const response = await fetch('/api/keys');
+    if (!response.ok) return;
+    const status = await response.json();
+    if (!status.app) return;  // the team's own setup uses engine/.env instead
+    $('#keys-toggle').hidden = false;
+    $('#keys-panel').hidden = status.openai && status.elevenlabs;
+    showKeyState(status);
+    if (status.ready) loadExamples();
+  } catch (error) { /* voice server not running: the case form still works */ }
+}
+
+$('#keys-toggle').addEventListener('click', () => {
+  $('#keys-panel').hidden = !$('#keys-panel').hidden;
+  if (!$('#keys-panel').hidden) $('#keys-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
 });
+
+$('#keys-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const button = $('#keys-save');
+  button.disabled = true;
+  $('#keys-note').textContent = 'Checking the keys and setting up your patient agent…';
+  try {
+    const response = await fetch('/api/keys', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ openai_key: $('#openai-key').value, elevenlabs_key: $('#elevenlabs-key').value }),
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      const errors = result.detail && result.detail.errors;
+      throw new Error(errors ? Object.values(errors).join(' ') : (result.detail || result.error || 'Could not save the keys.'));
+    }
+    $('#openai-key').value = '';
+    $('#elevenlabs-key').value = '';
+    showKeyState(result);
+    const credits = result.checks && result.checks.elevenlabs && result.checks.elevenlabs.credits_left;
+    $('#keys-note').textContent = result.voice_error
+      ? 'Keys saved, but the voice could not be set up: ' + result.voice_error
+      : 'Keys saved.' + (credits != null ? ' ElevenLabs credits left: ' + credits.toLocaleString() + '.' : '');
+    if (result.ready) {
+      loadExamples();
+      if (!result.voice_error) $('#keys-panel').hidden = true;
+      showToast('Ready. Pick a patient and start talking.');
+    }
+  } catch (error) {
+    $('#keys-note').textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+});
+
+$('#keys-forget').addEventListener('click', async () => {
+  const response = await fetch('/api/keys', { method: 'DELETE' });
+  if (response.ok) {
+    showKeyState(await response.json());
+    $('#keys-note').textContent = 'The keys were removed from this computer.';
+  }
+});
+
+loadKeyStatus();
+
+async function sessionTarget() {
+  if (!liveSigned) return { agentId: liveAgentId };
+  const response = await fetch('/api/signed-url');
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.detail || result.error || 'Could not get a conversation link.');
+  return { signedUrl: result.signed_url };
+}
 
 $('#talk-button').addEventListener('click', async () => {
   if (!liveAgentId || conversation) return;
@@ -302,9 +408,10 @@ $('#talk-button').addEventListener('click', async () => {
   setConversationState('connecting', 'Connecting…');
   try {
     const { Conversation } = await import(ELEVENLABS_CLIENT_URL);
+    const target = await sessionTarget();
     openStage();
     conversation = await Conversation.startSession({
-      agentId: liveAgentId,
+      ...target,
       // WebSocket mode delivers the patient's raw PCM in onAudio, which we relay to Unreal.
       connectionType: 'websocket',
       onAudio: (base64Audio) => sendToStage({ type: 'audio', sample_rate: PATIENT_AUDIO_RATE, pcm_b64: base64Audio }),

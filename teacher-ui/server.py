@@ -25,6 +25,8 @@ PORT = int(os.getenv("TEACHER_UI_PORT", "8765"))
 # The engine's voice server (engine/voice_server.py); "Start conversation" loads the case there.
 VOICE_SERVER_URL = os.getenv("VOICE_SERVER_URL", "http://127.0.0.1:8787").rstrip("/")
 MAX_REQUEST_BYTES = 1_000_000
+# Read-only routes passed through to the voice server for the app's key screen and case list
+PROXY_ROUTES = {"/api/keys": "/keys", "/api/signed-url": "/signed-url", "/api/examples": "/cases"}
 SAVE_LOCK = threading.Lock()
 
 FACT_CATEGORIES = (
@@ -107,6 +109,9 @@ class TeacherHandler(SimpleHTTPRequestHandler):
         if path == "/api/next-id":
             self._json(200, {"case_id": next_case_id()})
             return
+        if path in PROXY_ROUTES:
+            self._proxy("GET", PROXY_ROUTES[path])
+            return
         if path.startswith("/api/"):
             self.send_error(404, "Unknown API route")
             return
@@ -118,6 +123,9 @@ class TeacherHandler(SimpleHTTPRequestHandler):
         route = urlparse(self.path).path
         if route == "/api/start":
             self._start_conversation()
+            return
+        if route == "/api/keys":
+            self._proxy("POST", "/keys", self._read_body())
             return
         if route != "/api/cases":
             self.send_error(404, "Unknown API route")
@@ -162,6 +170,41 @@ class TeacherHandler(SimpleHTTPRequestHandler):
                 "case_pair_id": case["case_pair_id"],
                 "name": case["patient"]["name"],
             })
+
+    def do_DELETE(self):
+        if urlparse(self.path).path == "/api/keys":
+            self._proxy("DELETE", "/keys")
+            return
+        self.send_error(404, "Unknown API route")
+
+    def _read_body(self) -> bytes | None:
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            return None
+        return self.rfile.read(length) if 0 < length <= MAX_REQUEST_BYTES else None
+
+    def _proxy(self, method: str, path: str, body: bytes | None = None):
+        """Pass a key-screen request through to the voice server (both run on this computer)."""
+        if self.client_address[0] not in ("127.0.0.1", "::1"):
+            self._json(403, {"error": "Keys can only be managed on this computer."})
+            return
+        request = urllib.request.Request(
+            f"{VOICE_SERVER_URL}{path}", data=body, method=method, headers={"Content-Type": "application/json"}
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:
+                status, data = response.status, response.read()
+        except urllib.error.HTTPError as error:
+            status, data = error.code, error.read()
+        except (urllib.error.URLError, TimeoutError, OSError):
+            self._json(502, {"error": f"The voice server is not running at {VOICE_SERVER_URL}."})
+            return
+        try:
+            payload = json.loads(data or b"{}")
+        except ValueError:
+            payload = {"error": data[:300].decode("utf-8", "replace")}
+        self._json(status, payload if isinstance(payload, dict) else {"result": payload})
 
     def _start_conversation(self):
         """Load a saved case into the voice server and return the ElevenLabs talk link."""

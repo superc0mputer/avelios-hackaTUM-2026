@@ -1137,3 +1137,11 @@ input:focus, select:focus, textarea:focus {
   .bubble { max-width: 92%; }
   .conversation-link { margin-left: 0; }
 }
+
+/* Packaged app: API key screen and example patients */
+.keys-panel, .examples-panel { margin-bottom: 22px; }
+.keys-panel h2, .examples-panel h2 { margin: 0 0 6px; }
+.keys-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.keys-toggle { cursor: pointer; margin-right: 8px; font: inherit; font-size: 8px; font-weight: 700; }
+.keys-panel .field small { color: var(--muted); font-size: 11px; min-height: 1em; }
+#example-case { min-width: 260px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; font: inherit; background: var(--white); }

@@ -38,3 +38,6 @@ unreal/VIPPatient/Content/Developers/
 unreal/VIPPatient/Content/Collections/
 # written by the editor on first launch
 unreal/VIPPatient/Config/DefaultInput.ini
+
+# Windows app download built by app/make_windows_app.ps1 (contains Epic assets)
+dist/

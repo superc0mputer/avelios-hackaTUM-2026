@@ -12,10 +12,35 @@
     <header class="topbar">
       <a class="brand" href="/" aria-label="VIP Case Studio home"><span class="brand-mark">V</span><span><strong>VIP</strong><small>Case Studio</small></span></a>
       <div class="top-context"><i></i> Local authoring workspace</div>
+      <button class="top-tag keys-toggle" id="keys-toggle" type="button" hidden>API KEYS</button>
       <span class="top-tag">TEACHER TOOL</span>
     </header>
 
     <main class="page-shell">
+      <section class="card section keys-panel" id="keys-panel" hidden aria-labelledby="keys-title">
+        <p class="eyebrow">FIRST START</p>
+        <h2 id="keys-title">Add your own API keys</h2>
+        <p class="section-intro">The patient thinks with OpenAI and speaks with ElevenLabs, using <b>your</b> accounts. The keys are stored encrypted on this computer only and are sent only to OpenAI and ElevenLabs. To make the voice work, the app also stores your OpenAI key as a secret in your ElevenLabs workspace and creates one agent there called “VIP Patient (local app)”.</p>
+        <form id="keys-form" class="grid two" autocomplete="off">
+          <label class="field"><span>OpenAI API key <b>*</b></span><input id="openai-key" type="password" placeholder="sk-…" spellcheck="false"><small id="openai-key-state"></small></label>
+          <label class="field"><span>ElevenLabs API key <b>*</b></span><input id="elevenlabs-key" type="password" placeholder="Paste your ElevenLabs key" spellcheck="false"><small id="elevenlabs-key-state"></small></label>
+          <div class="field full keys-actions">
+            <button class="save-button" id="keys-save" type="submit">Check &amp; save keys <span>✓</span></button>
+            <button class="back-button" id="keys-forget" type="button">Forget keys on this computer</button>
+          </div>
+        </form>
+        <p class="conversation-note" id="keys-note"></p>
+      </section>
+
+      <section class="card section examples-panel" id="examples-panel" hidden aria-labelledby="examples-title">
+        <p class="eyebrow">QUICK START</p>
+        <h2 id="examples-title">Talk to an example patient</h2>
+        <p class="section-intro">Pick a ready-made case, or create your own below.</p>
+        <div class="keys-actions">
+          <select id="example-case" aria-label="Example patient"></select>
+          <button class="save-button" id="example-start" type="button">Start conversation <span>→</span></button>
+        </div>
+      </section>
       <section class="page-heading">
         <div class="hero-copy">
           <p class="eyebrow">CASE AUTHORING</p>

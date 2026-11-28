@@ -33,12 +33,19 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 
+import eleven_agent
+import key_check
+import keystore
 from case_adapter import load_patient_config
-from llm_client import ChatActorClient, LLMClientError
+from llm_client import DEFAULT_MODEL, ChatActorClient, LLMClientError
 from models import PatientConfig
 from prompt_builder import build_system_prompt
 
 load_dotenv()
+# The packaged app (VIP_APP=1) keeps the judge's own keys in the local key store.
+APP_MODE = os.getenv("VIP_APP") == "1"
+if APP_MODE:
+    keystore.apply_to_environ()
 log = logging.getLogger("voice_server")
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -98,12 +105,14 @@ class PatientSession:
     def __init__(self, client_factory: Callable[[str], ChatActorClient] | None = None) -> None:
         self._client_factory = client_factory or (lambda prompt: ChatActorClient(prompt))
         self.case_path: Path | None = None
+        self.source: Path | dict[str, Any] | None = None
         self.config: PatientConfig | None = None
         self.client: ChatActorClient | None = None
         self.mood = "neutral"
 
     def load(self, source: Path | dict[str, Any]) -> None:
         """Load a case (engine format or teacher-UI format) from a path or a dict."""
+        self.source = source
         data = source if isinstance(source, dict) else json.loads(Path(source).read_text(encoding="utf-8"))
         config = load_patient_config(data)
         self.mood = str((data.get("personality") or {}).get("mood") or "neutral")
@@ -160,7 +169,130 @@ def create_app(session: PatientSession | None = None, *, load_case: bool = True)
     app.state.session = session or PatientSession()
     app.state.stage = StageHub()
     if load_case:
-        app.state.session.load(_case_path_from_env())
+        try:
+            app.state.session.load(_case_path_from_env())
+        except LLMClientError as exc:
+            if not APP_MODE:
+                raise
+            # First start of the app: no keys yet, the key screen asks for them
+            app.state.session.source = _case_path_from_env()
+            log.info("waiting for API keys: %s", exc)
+
+    def _is_local(request: Request) -> bool:
+        return request.client is not None and request.client.host in ("127.0.0.1", "::1", "testclient")
+
+    def _key_status() -> dict[str, Any]:
+        s: PatientSession = app.state.session
+        return {
+            "app": APP_MODE,
+            "openai": bool(os.getenv("OPENAI_API_KEY")),
+            "elevenlabs": bool(os.getenv("ELEVENLABS_API_KEY")),
+            "agent": bool(os.getenv("ELEVENLABS_AGENT_ID")),
+            "model": os.getenv("OPENAI_MODEL") or DEFAULT_MODEL,
+            "ready": s.client is not None,
+        }
+
+    def _push_prompt() -> str | None:
+        """Write the loaded case's prompt into the judge's ElevenLabs agent. Returns an error or None."""
+        s: PatientSession = app.state.session
+        key, agent = os.getenv("ELEVENLABS_API_KEY"), os.getenv("ELEVENLABS_AGENT_ID")
+        if not (key and agent and s.client):
+            return None
+        try:
+            eleven_agent.set_prompt(key, agent, s.client.system_prompt)
+        except eleven_agent.ElevenLabsError as exc:
+            log.error("could not update the agent prompt: %s", exc)
+            return str(exc)
+        return None
+
+    @app.get("/keys")
+    def keys_status(request: Request) -> dict[str, Any]:
+        """Which keys the app has (never the values). Local only."""
+        if not _is_local(request):
+            raise HTTPException(403, "local only")
+        return _key_status()
+
+    @app.post("/keys")
+    async def keys_save(request: Request) -> dict[str, Any]:
+        """Check and store the judge's keys: {"openai_key": ..., "elevenlabs_key": ...}. Local only.
+
+        Keys left empty keep their stored value. Nothing is stored if a given key fails its check.
+        """
+        if not _is_local(request):
+            raise HTTPException(403, "local only")
+        body = await request.json()
+        openai_key = str(body.get("openai_key") or "").strip()
+        eleven_key = str(body.get("elevenlabs_key") or "").strip()
+        model = os.getenv("OPENAI_MODEL") or DEFAULT_MODEL
+        checks: dict[str, Any] = {}
+        if openai_key:
+            checks["openai"] = key_check.check_openai(openai_key, model)
+        if eleven_key:
+            checks["elevenlabs"] = key_check.check_elevenlabs(eleven_key)
+        failed = {name: c["error"] for name, c in checks.items() if not c["ok"]}
+        if failed:
+            raise HTTPException(422, {"errors": failed})
+
+        changes = {}
+        if openai_key:
+            changes["OPENAI_API_KEY"] = openai_key
+        if eleven_key:
+            changes["ELEVENLABS_API_KEY"] = eleven_key
+        if changes:
+            if APP_MODE:
+                keystore.save(changes)
+            os.environ.update(changes)
+
+        result: dict[str, Any] = {"checks": checks}
+        el_key, oa_key = os.getenv("ELEVENLABS_API_KEY"), os.getenv("OPENAI_API_KEY")
+        if el_key and oa_key and (changes or not os.getenv("ELEVENLABS_AGENT_ID")):
+            # A new OpenAI key needs a new secret, so set the agent up again then
+            reuse = None if openai_key else os.getenv("ELEVENLABS_AGENT_ID")
+            try:
+                agent_id = eleven_agent.ensure_agent(el_key, oa_key, model, reuse)
+                os.environ["ELEVENLABS_AGENT_ID"] = agent_id
+                if APP_MODE:
+                    keystore.save({"ELEVENLABS_AGENT_ID": agent_id})
+            except eleven_agent.ElevenLabsError as exc:
+                log.error("ElevenLabs agent setup failed: %s", exc)
+                result["voice_error"] = str(exc)
+
+        s: PatientSession = app.state.session
+        if oa_key and s.source is not None:
+            try:
+                s.load(s.source)
+            except Exception as exc:  # noqa: BLE001
+                raise HTTPException(422, f"keys saved, but the case could not be loaded: {exc}") from exc
+            error = _push_prompt()
+            if error:
+                result.setdefault("voice_error", error)
+        result.update(_key_status())
+        return result
+
+    @app.delete("/keys")
+    def keys_forget(request: Request) -> dict[str, Any]:
+        """Forget the stored keys on this computer. Local only."""
+        if not _is_local(request):
+            raise HTTPException(403, "local only")
+        if APP_MODE:
+            keystore.clear()
+        for name in keystore.KEY_NAMES:
+            os.environ.pop(name, None)
+        app.state.session.client = None
+        return _key_status()
+
+    @app.get("/signed-url")
+    def get_signed_url(request: Request) -> dict[str, Any]:
+        """A fresh conversation link for the judge's ElevenLabs agent. Local only."""
+        if not _is_local(request):
+            raise HTTPException(403, "local only")
+        key, agent = os.getenv("ELEVENLABS_API_KEY"), os.getenv("ELEVENLABS_AGENT_ID")
+        if not (key and agent):
+            raise HTTPException(409, "add an ElevenLabs key first")
+        try:
+            return {"signed_url": eleven_agent.signed_url(key, agent)}
+        except eleven_agent.ElevenLabsError as exc:
+            raise HTTPException(502, str(exc)) from exc
 
     @app.middleware("http")
     async def tunnel_guard(request: Request, call_next):
@@ -212,10 +344,18 @@ def create_app(session: PatientSession | None = None, *, load_case: bool = True)
         demo = s.config.demographics
         # The MetaHuman starts with the case's mood (per-reply emotion comes later).
         await app.state.stage.set_emotion(s.mood)
-        return {
+        result = {
             "case_id": s.config.case_id, "name": demo.full_name, "age": demo.age, "mood": s.mood,
             "agent_id": (os.getenv("ELEVENLABS_AGENT_ID") or "").strip() or None, "talk_url": talk_url(),
         }
+        if APP_MODE:
+            # The app's agent lives in the judge's account and calls OpenAI directly: give it this case
+            error = _push_prompt()
+            result["signed"] = True
+            result["talk_url"] = None
+            if error:
+                result["voice_error"] = error
+        return result
 
     def _via_tunnel(ws: WebSocket) -> bool:
         return any(h in ws.headers for h in TUNNEL_HEADERS)
