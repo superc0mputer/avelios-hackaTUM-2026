@@ -109,7 +109,7 @@ teacher page (ElevenLabs SDK) --audio--> voice server /ws/stage --audio + emotio
 ```
 
 - Start the voice server on an address Unreal can reach (`--host 0.0.0.0`; `/ws/*` is refused through the public tunnel).
-- Start Unreal with `VIP_SERVER=ws://<voice-server-host>:8787/ws/unreal unreal/build.sh --run`, or pass `-VIPServer=ws://...` to the editor or the packaged app.
+- Start Unreal with `VIP_SERVER=ws://<voice-server-ip>:8787/ws/unreal unreal/build.sh --run`, or pass `-VIPServer=ws://...` to the editor or the packaged app. Use an IPv4 address (e.g. `127.0.0.1` or the host's Tailscale IP), not `localhost` or a hostname: the voice server listens on IPv4 only, and macOS may try IPv6 first.
 - Messages to Unreal, as JSON text:
   - `{"type":"audio","sample_rate":16000,"pcm_b64":...}`: the patient's voice as mono 16-bit PCM → `UVIPSpeechSubsystem::Speak`;
   - `{"type":"emotion","emotion":"sad","intensity":0.6}` → `SetEmotion` (the case's starting mood for now);
@@ -121,9 +121,10 @@ teacher page (ElevenLabs SDK) --audio--> voice server /ws/stage --audio + emotio
 The repository holds only our project file, config, C++ module and build scripts. The MetaHuman is **rebuilt on your machine** from an Epic preset, so no Epic assets are published.
 
 **You need**
-- macOS (tested on an M4 MacBook Air with 16 GB, Xcode 26.6) or Windows (**not tested yet**; needs Visual Studio 2022 with "Game development with C++"). Linux is not supported.
+- macOS (tested on an M4 MacBook Air with 16 GB, Xcode 26.6, and an M2 Pro MacBook Pro with 16 GB, Xcode 27) or Windows (**not tested yet**; needs Visual Studio 2022 with "Game development with C++"). Linux is not supported.
 - Unreal Engine 5.8 with **MetaHuman Creator Core Data** (Epic Games Launcher → 5.8 → Options)
 - An Epic account signed in through the launcher, and internet: textures and rig come from Epic's online services
+- On Xcode 26 or later, the Metal toolchain (Unreal compiles its shaders with it; without it the first build stops with "missing Metal Toolchain"): `xcodebuild -downloadComponent MetalToolchain`
 - About 5 GB of free disk space (more for packaging), and a short repository path without spaces
 
 macOS:
@@ -138,7 +139,7 @@ Windows (PowerShell, from the repository folder; the policy flag applies to this
 powershell -ExecutionPolicy Bypass -File unreal\build.ps1 -Run
 ```
 
-The first build takes around 10 minutes per patient on the Mac we tested. Later runs skip what is already built. Options on macOS:
+The first build takes around 10 minutes per patient on the Mac we tested (about 15 on a second Mac, with Unreal on a USB drive). During the first step Epic may ask you to sign in; the build waits for it. Building the MetaHuman briefly needs more than 16 GB of memory, so close other heavy apps. Later runs skip what is already built. Options on macOS:
 
 - `unreal/build.sh` builds without opening the window
 - `unreal/build.sh --clean` rebuilds from scratch
@@ -158,6 +159,14 @@ unreal/package.sh
 
 On Windows: `powershell -ExecutionPolicy Bypass -File unreal\package.ps1` (not tested yet). The app lands in `unreal/VIPPatient/Saved/Package/` and is about 2 GB. It contains Epic assets, so **never commit or publish it**; share it privately. The Mac app is not signed with a developer account yet, so another Mac will ask for permission the first time it opens.
 
+### Demo view (#26)
+
+- Full screen: start the packaged app with `-fullscreen` (standard Unreal flag). Not verified yet: in a test with the Mac's screen locked, the app hung while creating the window (macOS cannot switch to a full-screen Space on a locked screen), while `-windowed` worked. Try it once with the screen unlocked; fallback: `-windowed -resx=<screen width> -resy=<screen height>`.
+- Delay Unreal adds: speech is held back 0.12 s so lips and voice line up (`SoundDelaySeconds`). Measured in the game window on an M4 MacBook Air (10 sentences, `-VIPWav=` runs log `VIP latency:` lines): the jaw opens 74 to 96 ms after `Speak()`, the sound is queued about 120 ms after it, so the mouth leads the sound by 25 to 46 ms plus the audio device's own latency. Viewers tolerate sound slightly after the lips much better than before them. The voice reaches the speakers about 0.13 s later than without Unreal; network and text-to-speech time come on top.
+- Keep the demo machine otherwise idle: with a background process using a full core and a hot machine, the jaw opened 200 to 580 ms after `Speak()`, so the lips trailed the voice by up to 0.45 s.
+- If Unreal fails: the teacher page plays the patient's voice itself whenever no Unreal client is connected to the voice server (#49), so the conversation goes on voice-only.
+- Checked tonight: the packaged app (2.4 GB) loads a case, swaps the patient, plays the body idle and shows signs, breathing, emotions and pain.
+
 ### Patients
 
 The app has six patients, built from Epic presets listed in `unreal/VIPPatient/Scripts/patients.json`. Ages are estimated from how the faces look:
@@ -171,7 +180,7 @@ The app has six patients, built from Epic presets listed in `unreal/VIPPatient/S
 | Bruce | male | 50 |
 | Walter | male | 72 (default) |
 
-The app shows the patient closest to the case: gender first, then age. For now this comes from the command line, for example `-VIPGender=female -VIPAge=25` (from the case JSON later, #24). The camera and face lights follow the patient's head height.
+The app shows the patient closest to the case: gender first, then age. For now this comes from the command line, for example `-VIPGender=female -VIPAge=25` (from the case JSON later, #24). The camera and face lights follow the patient's head position.
 
 To add a patient, add a line to `patients.json` with an Epic preset name (see `Engine/Plugins/MetaHuman/MetaHumanCharacter/Content/Optional/Presets` in the Unreal folder) and run the build again. Each patient adds about 10 minutes of build time and about 0.5 GB to the app.
 

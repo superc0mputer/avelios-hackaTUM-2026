@@ -41,6 +41,30 @@ namespace
 	// Solver look-ahead plus processing
 	constexpr double SoundDelaySeconds = 0.12;
 
+	// The face value the patient currently receives, or -1 if there is no frame yet
+	float ReadFaceValue(const TCHAR* Property)
+	{
+		IModularFeatures& Features = IModularFeatures::Get();
+		if (!Features.IsModularFeatureAvailable(ILiveLinkClient::ModularFeatureName))
+		{
+			return -1.0f;
+		}
+		FLiveLinkSubjectFrameData Frame;
+		ILiveLinkClient& Client = Features.GetModularFeature<ILiveLinkClient>(ILiveLinkClient::ModularFeatureName);
+		if (!Client.EvaluateFrame_AnyThread(FLiveLinkSubjectName(SubjectName), ULiveLinkBasicRole::StaticClass(), Frame))
+		{
+			return -1.0f;
+		}
+		const FLiveLinkBaseStaticData* Static = Frame.StaticData.Cast<FLiveLinkBaseStaticData>();
+		const FLiveLinkBaseFrameData* Data = Frame.FrameData.Cast<FLiveLinkBaseFrameData>();
+		if (!Static || !Data)
+		{
+			return -1.0f;
+		}
+		const int32 Index = Static->PropertyNames.IndexOfByKey(FName(Property));
+		return Data->PropertyValues.IsValidIndex(Index) ? Data->PropertyValues[Index] : -1.0f;
+	}
+
 	// Emotion blending. Time constants: about 63 % of the way after this many seconds.
 	constexpr float CrossfadeSeconds = 0.4f;   // from one emotion to the next
 	constexpr float RiseSeconds = 0.3f;        // strength going up
@@ -445,9 +469,18 @@ void UVIPSpeechSubsystem::Speak(const TArray<int16>& Samples, int32 SampleRate)
 	{
 		Floats.Add(Sample / 32768.0f);
 	}
+	const double Now = FPlatformTime::Seconds();
+	if (bLogFace && Now >= SpeakingUntil)
+	{
+		// Delay probe (test runs only): where the voice starts in this audio, measured from the call
+		int32 Onset = Audio.IndexOfByPredicate([](int16 Sample) { return FMath::Abs(Sample) > 1000; });
+		LatencySpeakAt = Now;
+		LatencyVoiceOffset = Onset == INDEX_NONE ? 0.0 : static_cast<double>(Onset) / Queue->SampleRate;
+		bLatencyPending = true;
+		bLatencySoundPending = true;
+	}
 	Queue->Add(Floats);
 
-	const double Now = FPlatformTime::Seconds();
 	if (DelayedSound.IsEmpty())
 	{
 		PlaySoundAt = Now + SoundDelaySeconds;
@@ -762,6 +795,11 @@ void UVIPSpeechSubsystem::Tick(float DeltaTime)
 	{
 		Voice->QueueAudio(reinterpret_cast<const uint8*>(DelayedSound.GetData()), DelayedSound.Num() * sizeof(int16));
 		DelayedSound.Reset();
+		if (bLatencySoundPending)
+		{
+			bLatencySoundPending = false;
+			UE_LOG(LogVIP, Display, TEXT("VIP latency: sound queued %.0f ms after Speak()"), (Now - LatencySpeakAt) * 1000.0);
+		}
 	}
 
 	if (NextTestMoodAt > 0 && Now >= NextTestMoodAt && TestMoods.Num() > 0)
@@ -783,7 +821,28 @@ void UVIPSpeechSubsystem::Tick(float DeltaTime)
 
 	if (bLogFace)
 	{
+		ProbeLatency(Now);
 		LogFace(DeltaTime);
+	}
+}
+
+void UVIPSpeechSubsystem::ProbeLatency(double Now)
+{
+	if (!bLatencyPending)
+	{
+		return;
+	}
+	if (ReadFaceValue(TEXT("CTRL_expressions_jawOpen")) > 0.05f)
+	{
+		bLatencyPending = false;
+		const double Mouth = Now - LatencySpeakAt;
+		UE_LOG(LogVIP, Display, TEXT("VIP latency: jaw opens %.0f ms after Speak(); voice starts %.0f ms into the audio, so the mouth leads the sound by %.0f ms (sound held back %.0f ms, audio device latency not included)"),
+			Mouth * 1000.0, LatencyVoiceOffset * 1000.0, (SoundDelaySeconds + LatencyVoiceOffset - Mouth) * 1000.0, SoundDelaySeconds * 1000.0);
+	}
+	else if (Now - LatencySpeakAt > 3.0)
+	{
+		bLatencyPending = false;
+		UE_LOG(LogVIP, Warning, TEXT("VIP latency: jaw did not open within 3 s of Speak()"));
 	}
 }
 
