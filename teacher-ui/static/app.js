@@ -266,6 +266,9 @@ function openVideo() {
     if (videoUrlObject) URL.revokeObjectURL(videoUrlObject);
     videoUrlObject = next;
     $('#patient-video-note').textContent = '';
+    const first = !watchingVideo();
+    lastFrameAt = performance.now();
+    if (first) applyUnrealRouting();
   };
   video.onclose = () => {
     video = null;
@@ -274,10 +277,71 @@ function openVideo() {
   };
 }
 
+// ---- Lip sync: the video of the lips arrives later than the voice (browser -> homebox -> Unreal
+// -> picture -> back). While someone watches the video, this page plays the voice itself, delayed
+// by that trip, instead of letting the ElevenLabs SDK play it at once. ----
+const LIP_SYNC_KEY = 'vip-lipsync-ms';
+let lipSyncMs = 400;
+try { lipSyncMs = Number(localStorage.getItem(LIP_SYNC_KEY) ?? 400); } catch (error) { /* default */ }
+let lastFrameAt = -Infinity;
+let audioOut = null;      // AudioContext for the delayed voice
+let playHead = 0;         // when the next queued chunk starts (AudioContext time)
+let queued = [];          // scheduled chunks, stopped on interruption
+
+function watchingVideo() {
+  return performance.now() - lastFrameAt < 2000;
+}
+
+function delayedVoice() {
+  return watchingVideo() && !useMetaHuman();
+}
+
+function showLipSync() {
+  $('#lipsync').value = String(lipSyncMs);
+  $('#lipsync-value').textContent = lipSyncMs + ' ms';
+}
+showLipSync();
+$('#lipsync').addEventListener('input', () => {
+  lipSyncMs = Number($('#lipsync').value);
+  try { localStorage.setItem(LIP_SYNC_KEY, String(lipSyncMs)); } catch (error) { /* ignore */ }
+  showLipSync();
+});
+
+function playDelayed(base64Audio) {
+  if (!audioOut) return;
+  const raw = atob(base64Audio);
+  const samples = new Float32Array(raw.length >> 1);
+  for (let i = 0; i < samples.length; i++) {
+    const v = raw.charCodeAt(2 * i) | (raw.charCodeAt(2 * i + 1) << 8);  // 16-bit little endian
+    samples[i] = (v >= 0x8000 ? v - 0x10000 : v) / 0x8000;
+  }
+  if (!samples.length) return;
+  const buffer = audioOut.createBuffer(1, samples.length, PATIENT_AUDIO_RATE);
+  buffer.copyToChannel(samples, 0);
+  const source = audioOut.createBufferSource();
+  source.buffer = buffer;
+  source.connect(audioOut.destination);
+  // A new sentence starts lipSyncMs from now; chunks of the same sentence follow back to back
+  playHead = Math.max(playHead, audioOut.currentTime + lipSyncMs / 1000);
+  source.start(playHead);
+  playHead += buffer.duration;
+  queued.push(source);
+  source.onended = () => { queued = queued.filter((s) => s !== source); };
+}
+
+function stopDelayed() {
+  for (const source of queued) {
+    try { source.stop(); } catch (error) { /* already ended */ }
+  }
+  queued = [];
+  playHead = 0;
+}
+
 function applyUnrealRouting() {
   $('#metahuman-toggle').hidden = unrealListeners === 0;
+  $('#lipsync-row').hidden = !watchingVideo();
   if (!conversation) return;
-  conversation.setVolume({ volume: useMetaHuman() ? 0 : 1 });
+  conversation.setVolume({ volume: useMetaHuman() || delayedVoice() ? 0 : 1 });
   $('#conversation-note').textContent = useMetaHuman() ? 'The patient speaks through the MetaHuman.' : '';
 }
 
@@ -390,6 +454,9 @@ $('#talk-button').addEventListener('click', async () => {
   $('#conversation-note').textContent = '';
   setConversationState('connecting', 'Connecting…');
   try {
+    // Created during the click, so the browser lets it play sound
+    audioOut = audioOut || new AudioContext();
+    await audioOut.resume();
     const { Conversation } = await import(ELEVENLABS_CLIENT_URL);
     openStage();
     conversation = await Conversation.startSession({
@@ -397,12 +464,19 @@ $('#talk-button').addEventListener('click', async () => {
       // WebSocket mode delivers the patient's raw PCM in onAudio, which we relay to Unreal.
       connectionType: 'websocket',
       // Always to the MetaHuman (when one is connected) so its lips move; audible only if this page asks
-      onAudio: (base64Audio) => sendToStage({
-        type: 'audio', sample_rate: PATIENT_AUDIO_RATE, pcm_b64: base64Audio, audible: useMetaHuman(),
-      }),
+      onAudio: (base64Audio) => {
+        sendToStage({ type: 'audio', sample_rate: PATIENT_AUDIO_RATE, pcm_b64: base64Audio, audible: useMetaHuman() });
+        if (delayedVoice()) playDelayed(base64Audio);
+      },
+      // The student talked over the patient: drop the rest of the answer here and in Unreal
+      onInterruption: () => {
+        stopDelayed();
+        sendToStage({ type: 'interrupt' });
+      },
       onConnect: () => setConversationState('listening', 'Listening'),
       onDisconnect: () => {
         conversation = null;
+        stopDelayed();
         if (stage) stage.close();
         setConversationState('idle', 'Not connected');
         $('#talk-button').hidden = false;
