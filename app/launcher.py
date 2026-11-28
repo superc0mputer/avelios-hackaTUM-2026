@@ -1,4 +1,4 @@
-"""Starts the whole VIP patient app on one Windows computer.
+"""Starts the whole VIP patient app on one Windows computer (or a Mac, for testing).
 
 Run by "Start VIP Patient.exe" (app/StartVIPPatient.cs, the app's window) with the bundled Python. Starts the
 voice server (patient engine) and the page on this computer only and the patient (packaged Unreal app) without
@@ -8,6 +8,10 @@ Closing the app window stops everything.
     launcher.py --host        for the app window: prints VIP-READY when the page can be shown
     launcher.py               without the app window: opens the page in the default browser
     launcher.py --no-unreal   without the patient (the voice plays in the page)
+
+On macOS it also runs straight from the repository: engine/ and the packaged patient from
+unreal/package.sh (unreal/VIPPatient/Saved/Package/Mac/VIPPatient.app); there is no app window,
+the page opens in the default browser.
 """
 from __future__ import annotations
 
@@ -22,13 +26,26 @@ from pathlib import Path
 
 APP = Path(__file__).resolve().parent              # ...\app
 ROOT = APP.parent                                  # the folder the user unpacked
-ENGINE = APP / "engine"
+WINDOWS = sys.platform == "win32"
+# packaged app: app\engine; repository: engine/ next to app/
+ENGINE = next((folder for folder in (APP / "engine", ROOT / "engine") if (folder / "voice_server.py").is_file()), APP / "engine")
 HUD = APP / "hud"                                  # the website, on top of the patient
-PATIENT_EXE = ROOT / "Patient" / "VIPPatient.exe"
+if WINDOWS:
+    PATIENT_EXE = ROOT / "Patient" / "VIPPatient.exe"
+else:
+    _MAC_BINARY = Path("VIPPatient.app") / "Contents" / "MacOS" / "VIPPatient"
+    PATIENT_EXE = next(
+        (path for path in (ROOT / "Patient" / _MAC_BINARY, ROOT / "unreal/VIPPatient/Saved/Package/Mac" / _MAC_BINARY)
+         if path.is_file()),
+        ROOT / "Patient" / _MAC_BINARY,
+    )
 VC_REDIST = ROOT / "redist" / "vc_redist.x64.exe"
 VOICE_PORT, PAGE_PORT = 8787, 8765
 PAGE_URL = f"http://127.0.0.1:{PAGE_PORT}/"
-LOGS = Path(os.getenv("LOCALAPPDATA") or Path.home()) / "VIPPatient" / "logs"
+if WINDOWS:
+    LOGS = Path(os.getenv("LOCALAPPDATA") or Path.home()) / "VIPPatient" / "logs"
+else:
+    LOGS = Path.home() / "Library" / "Logs" / "VIPPatient"
 
 
 def say(message: str) -> None:
@@ -37,7 +54,7 @@ def say(message: str) -> None:
 
 def fail(message: str) -> None:
     print(f"\nERROR: {message}\n", flush=True)
-    if "--host" not in sys.argv:  # the app window shows the message itself
+    if "--host" not in sys.argv and sys.stdin and sys.stdin.isatty():  # the app window shows the message itself
         input("Press Enter to close this window.")
     sys.exit(1)
 
@@ -59,6 +76,8 @@ def wait_for(url: str, seconds: float) -> bool:
 
 def ensure_vc_runtime() -> None:
     """The patient window needs Microsoft's C++ runtime; most PCs have it already."""
+    if not WINDOWS:
+        return
     system32 = Path(os.getenv("SystemRoot", r"C:\Windows")) / "System32"
     if (system32 / "vcruntime140.dll").exists() and (system32 / "msvcp140.dll").exists():
         return
@@ -73,7 +92,7 @@ def start(args: list[str], cwd: Path, log_name: str, env: dict[str, str]) -> sub
     log = open(LOGS / log_name, "w", encoding="utf-8")
     return subprocess.Popen(
         args, cwd=cwd, env=env, stdout=log, stderr=subprocess.STDOUT,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        creationflags=subprocess.CREATE_NO_WINDOW if WINDOWS else 0,
     )
 
 
@@ -83,6 +102,8 @@ def stop_children_with_this_window() -> None:
     Closing the console kills Python before any cleanup code runs, so the engine and the
     patient window would otherwise keep running in the background.
     """
+    if not WINDOWS:
+        return  # macOS: Ctrl+C runs the cleanup in main()
     import ctypes
     from ctypes import wintypes
 
@@ -124,6 +145,8 @@ def stop_children_with_this_window() -> None:
 
 def picture_size() -> tuple[int, int]:
     """Size at which the patient is rendered: the screen's shape, at most 1920 wide."""
+    if not WINDOWS:
+        return _mac_picture_size()
     import ctypes
 
     try:
@@ -132,6 +155,20 @@ def picture_size() -> tuple[int, int]:
         ctypes.windll.user32.SetProcessDPIAware()
     screen_w = ctypes.windll.user32.GetSystemMetrics(0) or 1920
     screen_h = ctypes.windll.user32.GetSystemMetrics(1) or 1080
+    width = min(screen_w, 1920)
+    return width & ~1, (width * screen_h // screen_w) & ~1
+
+
+def _mac_picture_size() -> tuple[int, int]:
+    """The main screen's shape (in points) on a Mac, at most 1920 wide."""
+    try:
+        out = subprocess.run(
+            ["osascript", "-e", 'tell application "Finder" to get bounds of window of desktop'],
+            capture_output=True, text=True, timeout=5, check=True,
+        ).stdout
+        screen_w, screen_h = (int(value) for value in out.replace(" ", "").split(",")[2:4])
+    except Exception:  # noqa: BLE001 - no Finder access: assume 16:10
+        screen_w, screen_h = 1440, 900
     width = min(screen_w, 1920)
     return width & ~1, (width * screen_h // screen_w) & ~1
 
@@ -148,6 +185,9 @@ def patient_command() -> list[str]:
 
 def open_browser(url: str) -> None:
     """Open the page outside the job, so closing this window does not close the user's browser."""
+    if not WINDOWS:
+        webbrowser.open(url)
+        return
     try:
         subprocess.Popen(["cmd", "/c", "start", "", url], creationflags=0x01000000 | subprocess.CREATE_NO_WINDOW)
     except OSError:  # breakaway refused: fall back to the normal way

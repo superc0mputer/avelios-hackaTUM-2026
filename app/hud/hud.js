@@ -65,7 +65,7 @@
             <p class="eyebrow">API keys</p>
             <h2 id="hud-keys-title">Add your own API keys</h2>
             <p>The patient thinks with OpenAI and speaks with ElevenLabs, using <b>your</b> accounts. The keys are stored
-              encrypted on this computer only and are sent only to OpenAI and ElevenLabs. To make the voice work, the app also
+              on this computer only (on Windows encrypted for your user account) and are sent only to OpenAI and ElevenLabs. To make the voice work, the app also
               stores your OpenAI key as a secret in your ElevenLabs workspace and creates one agent there called
               “VIP Patient (local app)”.</p>
             <div class="grid" style="margin-top:18px">
