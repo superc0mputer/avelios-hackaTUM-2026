@@ -452,6 +452,10 @@ details.transcript summary { padding: 11px 14px; color: var(--ink-2); font-weigh
 .icon-btn { display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--on-dark); }
 .icon-btn:hover { background: rgb(255 255 255 / .08); }
 .icon-btn[aria-pressed="true"] { background: rgb(255 255 255 / .14); }
+/* Captions: clearly on (lit) or off (dimmed, crossed out) */
+#captions-toggle[aria-pressed="true"] { background: rgb(106 180 240 / .32); color: #fff; box-shadow: inset 0 0 0 1px rgb(106 180 240 / .6); }
+#captions-toggle[aria-pressed="false"] { color: var(--on-dark-muted); position: relative; }
+#captions-toggle[aria-pressed="false"]::after { content: ""; position: absolute; width: 22px; height: 2px; border-radius: 1px; background: currentColor; transform: rotate(-45deg); }
 .icon-btn svg { width: 19px; height: 19px; }
 .type-form { display: flex; align-items: center; gap: 6px; width: min(460px, 60vw); }
 .type-form input { min-height: 44px; border: 0; border-radius: 999px; background: rgb(255 255 255 / .08); color: #fff; }
