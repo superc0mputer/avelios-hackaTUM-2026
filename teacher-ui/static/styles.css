@@ -1140,3 +1140,7 @@ input:focus, select:focus, textarea:focus {
 
 .saved-row { display: flex; gap: 10px; flex-wrap: wrap; }
 .saved-row select { flex: 1 1 240px; }
+
+.metahuman-toggle { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 12px; }
+.metahuman-toggle[hidden] { display: none; }
+.metahuman-toggle small { color: var(--muted); }

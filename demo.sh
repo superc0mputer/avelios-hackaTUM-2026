@@ -4,6 +4,10 @@
 #
 #   ./demo.sh              everything; opens the teacher page
 #   ./demo.sh --no-unreal  without the MetaHuman (the voice then plays in the browser)
+#   ./demo.sh --tailnet    also serve the page over HTTPS to everyone on your Tailscale
+#                          network (https://<this machine>:8446; VIP_HTTPS_PORT to change).
+#                          A MetaHuman on another machine connects with
+#                          VIP_SERVER=wss://<this machine>:8446/ws/unreal unreal/build.sh --run
 #
 # Needs engine/.env with OPENAI_API_KEY, ENGINE_API_KEY, ELEVENLABS_API_KEY and
 # ELEVENLABS_AGENT_ID (see engine/.env.example), and for the MetaHuman a built patient
@@ -25,14 +29,28 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 say() { echo "== $*"; }
 
 unreal=1
+tailnet=0
+HTTPS_PORT="${VIP_HTTPS_PORT:-8446}"
 for arg in "$@"; do
   case "$arg" in
     --no-unreal) unreal=0 ;;
-    -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
+    --tailnet) tailnet=1 ;;
+    -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
     *) die "unknown option $arg (try --help)" ;;
   esac
 done
 [ "$(uname -s)" = Darwin ] || [ "$unreal" = 0 ] || die "the MetaHuman runs on macOS only here; use --no-unreal"
+if [ "$tailnet" = 1 ]; then
+  tailscale="$(command -v tailscale || true)"
+  [ -z "$tailscale" ] && [ -x /Applications/Tailscale.app/Contents/MacOS/Tailscale ] \
+    && tailscale=/Applications/Tailscale.app/Contents/MacOS/Tailscale
+  [ -n "$tailscale" ] || die "--tailnet needs the tailscale command"
+  host="$("$tailscale" status --json | python3 -c 'import json, sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))')" \
+    || die "cannot read this machine's Tailscale name (is Tailscale running?)"
+  # Never take over an address someone else serves on this machine
+  "$tailscale" serve status 2>/dev/null | grep -q ":$HTTPS_PORT " \
+    && die "https://$host:$HTTPS_PORT is already served (tailscale serve status); set VIP_HTTPS_PORT"
+fi
 
 # --- keys -------------------------------------------------------------------------
 [ -f "$env_file" ] || die "engine/.env is missing: cp engine/.env.example engine/.env and fill in the keys"
@@ -112,6 +130,7 @@ cleanup() {
   trap - EXIT INT TERM
   echo
   say "stopping"
+  [ "${served:-0}" = 1 ] && "$tailscale" serve --https="$HTTPS_PORT" off > /dev/null 2>&1 || true
   for pid in $pids; do
     pkill -TERM -P "$pid" 2>/dev/null || true   # children, e.g. the Unreal editor under build.sh
     kill -TERM "$pid" 2>/dev/null || true
@@ -165,6 +184,16 @@ tunnel_up() { curl -fs --max-time 5 $doh "$url/health"; }
 wait_for 60 "the tunnel ($url)" tunnel_up
 "$venv/bin/python" "$root/engine/point_agent.py" "$url/v1"
 
+if [ "$tailnet" = 1 ]; then
+  say "HTTPS for the tailnet on https://$host:$HTTPS_PORT"
+  # The page, and /ws for its voice relay and for a MetaHuman on another machine
+  "$tailscale" serve --bg --https="$HTTPS_PORT" "http://127.0.0.1:$PAGE_PORT" > "$logs/serve.log" 2>&1 \
+    || die "tailscale serve failed, see $logs/serve.log"
+  served=1
+  "$tailscale" serve --bg --https="$HTTPS_PORT" --set-path /ws "http://127.0.0.1:$VOICE_PORT/ws" >> "$logs/serve.log" 2>&1 \
+    || die "tailscale serve /ws failed, see $logs/serve.log"
+fi
+
 if [ "$unreal" = 1 ]; then
   say "MetaHuman patient (log: $logs/unreal.log)"
   VIP_SERVER="ws://127.0.0.1:$VOICE_PORT/ws/unreal" "$root/unreal/build.sh" --run > "$logs/unreal.log" 2>&1 &
@@ -173,7 +202,10 @@ if [ "$unreal" = 1 ]; then
 fi
 
 page="http://localhost:$PAGE_PORT"
-if command -v open > /dev/null; then open "$page"; elif command -v xdg-open > /dev/null; then xdg-open "$page" || true; fi
+[ "$tailnet" = 1 ] && page="https://$host:$HTTPS_PORT"
+# Open the page where someone sits at the screen (not on a headless server)
+if [ "$(uname -s)" = Darwin ]; then open "$page"
+elif [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && command -v xdg-open > /dev/null; then xdg-open "$page" || true; fi
 echo
 echo "Ready: $page  (Ctrl+C stops everything)"
 [ "$unreal" = 1 ] && echo "The patient window opens in about a minute; the page mutes itself once it is connected."

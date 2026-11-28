@@ -215,10 +215,32 @@ function stageUrl() {
     : 'ws://' + location.hostname + ':8787/ws/stage';
 }
 
+// Several people can open this page over the tailnet, but only one computer shows the
+// MetaHuman. Only a page that opts in sends its patient voice there and goes quiet itself.
+// Default: on for the demo computer itself (localhost), off elsewhere; remembered per browser.
+const METAHUMAN_KEY = 'vip-metahuman-voice';
+function initialMetaHumanChoice() {
+  try {
+    const saved = localStorage.getItem(METAHUMAN_KEY);
+    if (saved !== null) return saved === '1';
+  } catch (error) { /* storage blocked: fall back to the default */ }
+  return ['localhost', '127.0.0.1'].includes(location.hostname);
+}
+$('#metahuman-voice').checked = initialMetaHumanChoice();
+$('#metahuman-voice').addEventListener('change', () => {
+  try { localStorage.setItem(METAHUMAN_KEY, $('#metahuman-voice').checked ? '1' : '0'); } catch (error) { /* ignore */ }
+  applyUnrealRouting();
+});
+
+function useMetaHuman() {
+  return unrealListeners > 0 && $('#metahuman-voice').checked;
+}
+
 function applyUnrealRouting() {
+  $('#metahuman-toggle').hidden = unrealListeners === 0;
   if (!conversation) return;
-  conversation.setVolume({ volume: unrealListeners > 0 ? 0 : 1 });
-  $('#conversation-note').textContent = unrealListeners > 0 ? 'The patient speaks through the MetaHuman.' : '';
+  conversation.setVolume({ volume: useMetaHuman() ? 0 : 1 });
+  $('#conversation-note').textContent = useMetaHuman() ? 'The patient speaks through the MetaHuman.' : '';
 }
 
 function openStage() {
@@ -335,7 +357,9 @@ $('#talk-button').addEventListener('click', async () => {
       agentId: liveAgentId,
       // WebSocket mode delivers the patient's raw PCM in onAudio, which we relay to Unreal.
       connectionType: 'websocket',
-      onAudio: (base64Audio) => sendToStage({ type: 'audio', sample_rate: PATIENT_AUDIO_RATE, pcm_b64: base64Audio }),
+      onAudio: (base64Audio) => {
+        if (useMetaHuman()) sendToStage({ type: 'audio', sample_rate: PATIENT_AUDIO_RATE, pcm_b64: base64Audio });
+      },
       onConnect: () => setConversationState('listening', 'Listening'),
       onDisconnect: () => {
         conversation = null;
@@ -348,7 +372,7 @@ $('#talk-button').addEventListener('click', async () => {
       onModeChange: ({ mode }) => {
         setConversationState(mode, mode === 'speaking' ? 'Patient is speaking' : 'Listening');
         // The MetaHuman looks attentive while the student talks
-        if (mode === 'listening') sendToStage({ type: 'state', state: 'listening' });
+        if (mode === 'listening' && useMetaHuman()) sendToStage({ type: 'state', state: 'listening' });
       },
       onMessage: (payload) => {
         const role = payload.role || (payload.source === 'ai' ? 'agent' : 'user');
