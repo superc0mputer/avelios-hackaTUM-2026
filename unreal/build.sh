@@ -28,7 +28,8 @@ done
 case "$(uname -s)" in
   Darwin)
     editor="$UE_ROOT/Engine/Binaries/Mac/UnrealEditor.app/Contents/MacOS/UnrealEditor" ;;
-  *) die "only tested on macOS. On other systems run the three scripts in VIPPatient/Scripts from the editor." ;;
+  MINGW*|MSYS*|CYGWIN*) die "on Windows use unreal\\build.ps1 in PowerShell." ;;
+  *) die "only macOS and Windows (build.ps1) are supported." ;;
 esac
 [ -x "$editor" ] || die "Unreal Engine 5.8 not found at '$UE_ROOT' (set UE_ROOT)."
 presets="$UE_ROOT/Engine/Plugins/MetaHuman/MetaHumanCharacter/Content/Optional/Presets"

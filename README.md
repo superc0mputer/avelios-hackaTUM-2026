@@ -103,21 +103,31 @@ So far only the Unreal patient can be run (see below). Other setup instructions 
 The repository holds only our project file, config and build scripts. The MetaHuman is **rebuilt on your machine** from an Epic preset, so no Epic assets are published.
 
 **You need**
-- macOS (tested on an M4 MacBook Air with 16 GB). The build script does not support Windows or Linux yet.
+- macOS (tested on an M4 MacBook Air with 16 GB) or Windows (**not tested yet**). Linux is not supported.
 - Unreal Engine 5.8 with **MetaHuman Creator Core Data** (Epic Games Launcher → 5.8 → Options)
 - An Epic account signed in through the launcher, and internet: textures and rig come from Epic's online services
 - About 2 GB of free disk space, and a short repository path without spaces
+
+macOS:
 
 ```bash
 unreal/build.sh --run
 ```
 
-The first build takes around 10 minutes. Later runs skip what is already built. Options:
+Windows (PowerShell, from the repository folder; the policy flag applies to this run only):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File unreal\build.ps1 -Run
+```
+
+The first build takes around 10 minutes on the Mac we tested. Later runs skip what is already built. Options on macOS:
 
 - `unreal/build.sh` builds without opening the window
 - `unreal/build.sh --clean` rebuilds from scratch
 - `VIP_PRESET=Bruce unreal/build.sh --clean` uses a different Epic preset
 - `UE_ROOT=/path/to/UE_5.8 unreal/build.sh` if Unreal is installed elsewhere
+
+On Windows use `-Clean` and `-Run`, and set `$env:VIP_PRESET` or `$env:UE_ROOT` first if needed. Clone to a short path without spaces, such as `C:\dev`.
 
 Logs are in `unreal/VIPPatient/Saved/BuildLogs/`. To edit the scene, open `unreal/VIPPatient/VIPPatient.uproject` after building.
 
