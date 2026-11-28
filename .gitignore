@@ -38,3 +38,6 @@ unreal/VIPPatient/Content/Developers/
 unreal/VIPPatient/Content/Collections/
 # written by the editor on first launch
 unreal/VIPPatient/Config/DefaultInput.ini
+
+# demo.sh: logs and downloaded tools
+.demo/
