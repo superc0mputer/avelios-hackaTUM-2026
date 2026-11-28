@@ -17,6 +17,9 @@ public class VIPPatient : ModuleRules
 			"MetaHumanLocalLiveLinkSource",
 			"MetaHumanPipelineCore",
 			"SpeechAnimationSolver",
+			// Link to the voice server (VIPBackendLink)
+			"WebSockets",
+			"Json",
 		});
 	}
 }

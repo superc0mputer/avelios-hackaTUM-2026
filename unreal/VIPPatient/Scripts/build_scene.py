@@ -157,6 +157,7 @@ else:
     factory.set_editor_property("struct", unreal.VIPPatientRow.static_struct())
     table = unreal.AssetToolsHelpers.get_asset_tools().create_asset("DT_Patients", "/Game/Patient", unreal.DataTable, factory)
 rows = [{"Name": p["preset"], "Preset": p["preset"], "Gender": p["gender"], "Age": p["age"],
+         "Character": p.get("character", ""),
          "Blueprint": "%s.BP_MHC_%s_C" % (blueprint_path(p["preset"]), p["preset"])}
         for p in sorted(PATIENTS, key=lambda p: not p.get("default"))  # the app falls back to the first row
         if lib.does_asset_exist(blueprint_path(p["preset"]))]

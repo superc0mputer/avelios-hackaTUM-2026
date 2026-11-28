@@ -1,11 +1,11 @@
 {
-  "_comment": "Patients the app can show. preset: Epic MetaHuman preset. age: how old the face looks (estimated from renders), used to pick the closest patient for a case. Keep the list short: each patient adds about 0.5 GB to the app.",
+  "_comment": "Patients the app can show. preset: Epic MetaHuman preset. age: how old the face looks (estimated from renders), used to pick the closest patient for a case. Keep the list short: each patient adds about 0.5 GB to the app. character: the teacher UI's character_id; used when the case age is within 15 years, otherwise the closest age wins.",
   "patients": [
-    {"preset": "Walter", "gender": "male", "age": 72, "default": true},
-    {"preset": "Bruce", "gender": "male", "age": 50},
-    {"preset": "Trey", "gender": "male", "age": 25},
-    {"preset": "Grace", "gender": "female", "age": 76},
-    {"preset": "Lani", "gender": "female", "age": 58},
-    {"preset": "Sunita", "gender": "female", "age": 28}
+    {"preset": "Walter", "gender": "male", "age": 72, "character": "man-02", "default": true},
+    {"preset": "Bruce", "gender": "male", "age": 50, "character": "man-01"},
+    {"preset": "Trey", "gender": "male", "age": 25, "character": "man-03"},
+    {"preset": "Grace", "gender": "female", "age": 76, "character": "woman-02"},
+    {"preset": "Lani", "gender": "female", "age": 58, "character": "woman-01"},
+    {"preset": "Sunita", "gender": "female", "age": 28, "character": "woman-03"}
   ]
 }

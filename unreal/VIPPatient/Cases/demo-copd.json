@@ -1,0 +1,23 @@
+{
+  "_comment": "Demo case for the Unreal look only (#45): patient, mood, personality and the proposed 'presentation' field. Not a full teacher case.",
+  "case_id": "demo-copd",
+  "character_id": "woman-02",
+  "diagnosis": "COPD exacerbation (demo)",
+  "patient": {
+    "age": 76,
+    "gender": "female"
+  },
+  "personality": {
+    "type": "anxious_talkative",
+    "mood": "fear"
+  },
+  "presentation": {
+    "pain": 0,
+    "breathing": "laboured",
+    "discomfort": 0,
+    "visible_signs": [
+      "cyanosis",
+      "tired"
+    ]
+  }
+}
