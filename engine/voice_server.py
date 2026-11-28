@@ -1,5 +1,8 @@
 """Voice server: lets ElevenLabs Agents use this engine as its "custom LLM".
 
+A second route without ElevenLabs lives in ``openai_voice.py`` (``/ws/talk``):
+OpenAI speech-to-text and text-to-speech around the same patient engine.
+
 ElevenLabs does speech-to-text, turn-taking and text-to-speech. On every patient
 turn it calls ``POST /v1/chat/completions`` (OpenAI format, streamed) with the
 full conversation so far. We ignore its system message, put our patient system
@@ -20,6 +23,7 @@ Environment (engine/.env):
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -35,6 +39,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 
 from case_adapter import load_patient_config
 from llm_client import ChatActorClient, LLMClientError
+from openai_voice import OpenAIVoice, TalkSession
 from models import PatientConfig
 from prompt_builder import build_system_prompt
 
@@ -101,6 +106,7 @@ class PatientSession:
         self.config: PatientConfig | None = None
         self.client: ChatActorClient | None = None
         self.mood = "neutral"
+        self.case_data: dict[str, Any] | None = None
 
     def load(self, source: Path | dict[str, Any]) -> None:
         """Load a case (engine format or teacher-UI format) from a path or a dict."""
@@ -111,6 +117,7 @@ class PatientSession:
         self.client = self._client_factory(prompt)
         self.config = config
         self.case_path = source if isinstance(source, Path) else None
+        self.case_data = data
         log.info("loaded case %s (%s) with model %s", config.case_id, config.demographics.full_name, self.client.model)
 
 
@@ -155,10 +162,21 @@ def _case_path_from_env() -> Path:
     return Path(raw) if raw else DEFAULT_CASE_PATH
 
 
-def create_app(session: PatientSession | None = None, *, load_case: bool = True) -> FastAPI:
+def unreal_case_message(session: PatientSession) -> dict[str, Any] | None:
+    """The teacher case for Unreal (picks the MetaHuman, mood and presentation, #45)."""
+    data = session.case_data
+    if isinstance(data, dict) and "patient" in data:  # teacher-UI format only
+        return {"type": "case", "case": data}
+    return None
+
+
+def create_app(
+    session: PatientSession | None = None, *, load_case: bool = True, voice: OpenAIVoice | None = None,
+) -> FastAPI:
     app = FastAPI(title="VIP voice server")
     app.state.session = session or PatientSession()
     app.state.stage = StageHub()
+    app.state.voice = voice
     if load_case:
         app.state.session.load(_case_path_from_env())
 
@@ -210,11 +228,15 @@ def create_app(session: PatientSession | None = None, *, load_case: bool = True)
         except Exception as exc:  # validation errors, bad JSON, LLM client setup
             raise HTTPException(422, f"could not load case: {exc}") from exc
         demo = s.config.demographics
-        # The MetaHuman starts with the case's mood (per-reply emotion comes later).
+        # The MetaHuman shows the case's patient and starts with its mood (per-reply emotion comes later).
+        case_message = unreal_case_message(s)
+        if case_message:
+            await app.state.stage.to_unreal(case_message)
         await app.state.stage.set_emotion(s.mood)
         return {
             "case_id": s.config.case_id, "name": demo.full_name, "age": demo.age, "mood": s.mood,
             "agent_id": (os.getenv("ELEVENLABS_AGENT_ID") or "").strip() or None, "talk_url": talk_url(),
+            "openai_voice": True,
         }
 
     def _via_tunnel(ws: WebSocket) -> bool:
@@ -230,6 +252,9 @@ def create_app(session: PatientSession | None = None, *, load_case: bool = True)
         await ws.accept()
         hub.unreal.add(ws)
         log.info("unreal connected (%d)", len(hub.unreal))
+        case_message = unreal_case_message(app.state.session)
+        if case_message:
+            await ws.send_text(json.dumps(case_message))
         await ws.send_text(json.dumps(hub.emotion))
         await hub.status()
         try:
@@ -270,6 +295,53 @@ def create_app(session: PatientSession | None = None, *, load_case: bool = True)
             pass
         finally:
             hub.stages.discard(ws)
+
+    @app.websocket("/ws/talk")
+    async def talk_socket(ws: WebSocket) -> None:
+        """OpenAI voice route: the teacher page sends one student utterance at a time.
+
+        Page -> server: {"type": "utterance", "sample_rate": 16000, "pcm_b64": ...} (mono 16-bit PCM),
+        {"type": "speech_start"} when the student starts talking, {"type": "interrupt"}.
+        Server -> page: {"type": "state", "state": "thinking|speaking|listening"}, {"type": "student", "text"},
+        {"type": "patient", "text"}, {"type": "audio", ...} (only without Unreal), {"type": "error", "message"}.
+        Local/tailnet only.
+        """
+        if _via_tunnel(ws):
+            await ws.close(code=1008)
+            return
+        await ws.accept()
+        s: PatientSession = app.state.session
+        if s.client is None:
+            await ws.send_text(json.dumps({"type": "error", "message": "No case loaded."}))
+            await ws.close()
+            return
+        if app.state.voice is None:
+            app.state.voice = OpenAIVoice()
+        hub: StageHub = app.state.stage
+        lock = asyncio.Lock()
+
+        async def send_page(message: dict[str, Any]) -> None:
+            async with lock:
+                await ws.send_text(json.dumps(message))
+
+        talk = TalkSession(s, hub, app.state.voice, send_page)
+        await send_page({"type": "ready", "unreal": len(hub.unreal)})
+        await talk.state("listening")
+        try:
+            while True:
+                message = json.loads(await ws.receive_text())
+                kind = message.get("type")
+                if kind == "utterance" and isinstance(message.get("pcm_b64"), str):
+                    await talk.utterance(message["pcm_b64"], int(message.get("sample_rate") or 16000))
+                elif kind == "speech_start":
+                    await hub.to_unreal({"type": "state", "state": "listening"})
+                elif kind == "interrupt":
+                    await talk.interrupt()
+        except (WebSocketDisconnect, ValueError, json.JSONDecodeError, RuntimeError):
+            pass
+        finally:
+            await talk.close()
+            await hub.to_unreal({"type": "state", "state": "idle"})
 
     @app.get("/v1/models")
     def models() -> dict[str, Any]:

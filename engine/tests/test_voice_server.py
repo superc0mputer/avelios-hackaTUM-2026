@@ -132,6 +132,8 @@ def test_stage_relays_audio_and_emotion_to_unreal():
         case = json.loads((ENGINE_DIR.parent / "cases" / "case-001.json").read_text(encoding="utf-8"))
         case["personality"]["mood"] = "sad"
         assert client.post("/case", json={"case": case}).json()["mood"] == "sad"
+        # A teacher-UI case goes to Unreal first (it picks the MetaHuman), then its mood.
+        assert json.loads(unreal.receive_text()) == {"type": "case", "case": case}
         assert json.loads(unreal.receive_text())["emotion"] == "sad"
 
 
