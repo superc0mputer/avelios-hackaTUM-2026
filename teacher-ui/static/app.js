@@ -26,6 +26,7 @@ const stepHints = [
 ];
 let currentStep = 0;
 let toastTimer;
+let savedCaseId = null;
 
 function linesFrom(id) {
   return document.getElementById(id).value.split('\n').map((line) => line.trim()).filter(Boolean);
@@ -184,7 +185,41 @@ $('#case-form').addEventListener('submit', async (event) => {
     }
     $('#status').textContent = 'Saved ' + result.saved_as;
     showToast('Saved ' + result.saved_as);
+    savedCaseId = result.case_id;
+    $('#start-button').hidden = false;
   } catch (error) {
+    $('#status').textContent = error.message;
+    showToast(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+// Load the saved case into the patient engine, then open the ElevenLabs conversation.
+$('#start-button').addEventListener('click', async () => {
+  if (!savedCaseId) return;
+  const button = $('#start-button');
+  // Open the tab inside the click so the browser does not block it; navigate once loaded.
+  const tab = window.open('about:blank', '_blank');
+  button.disabled = true;
+  $('#status').textContent = 'Loading the patient…';
+  try {
+    const response = await fetch('/api/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ case_id: savedCaseId }),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Could not start the conversation.');
+    $('#status').textContent = 'Live now: ' + result.name + ', ' + result.age;
+    if (result.talk_url && tab) {
+      tab.location.href = result.talk_url;
+    } else {
+      if (tab) tab.close();
+      showToast('Loaded ' + result.name + '. Set ELEVENLABS_AGENT_ID to open the conversation.', true);
+    }
+  } catch (error) {
+    if (tab) tab.close();
     $('#status').textContent = error.message;
     showToast(error.message, true);
   } finally {
