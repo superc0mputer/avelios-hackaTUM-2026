@@ -53,6 +53,12 @@ public:
 	 */
 	void SetAttention(const FString& State);
 
+	/**
+	 * Pain 0 to 10 from the case or the turn (#35). Shows as a lasting pain face that grows with the
+	 * level, plus short winces now and then from level 3.
+	 */
+	void SetPain(float InLevel);
+
 	/** The student interrupted: stop talking now and look at them (#25, #37). */
 	void StopSpeaking();
 
@@ -105,6 +111,10 @@ private:
 	double EmotionSetAt = 0;
 	float Level = 0;
 	float Rest = 1;
+	float PainLevel = 0;  // 0 to 10, what was asked for
+	float PainShown = 0;  // 0 to 1, smoothed
+	double WinceStart = -1;
+	double NextWince = 0;
 	TMap<FString, float> EmotionWeights;
 	FString SolverEmotion = TEXT("neutral");
 	float SolverIntensity = 0;

@@ -52,6 +52,27 @@ namespace
 	}
 }
 
+void VIPExpressions::AddPain(float Weight, TMap<FString, float>& Out)
+{
+	if (Weight <= 0)
+	{
+		return;
+	}
+	static const FControl Pain[] = {
+		{TEXT("browDown"), 0.6f}, {TEXT("browLateral"), 0.45f},                               // AU4
+		{TEXT("eyeCheekRaise"), 0.45f}, {TEXT("eyeSquintInner"), 0.5f}, {TEXT("eyeLidPress"), 0.4f}, // AU6, AU7
+		{TEXT("noseWrinkle"), 0.45f}, {TEXT("mouthUpperLipRaise"), 0.25f},                    // AU9, AU10
+		{TEXT("eyeBlink"), 0.3f},                                                             // AU43, partly
+		{TEXT("mouthStretch"), 0.15f},                                                        // grimace
+	};
+	for (const FControl& Control : Pain)
+	{
+		const FString Base = FString(TEXT("CTRL_expressions_")) + Control.Name;
+		Out.FindOrAdd(Base + TEXT("L")) += Control.Value * Weight;
+		Out.FindOrAdd(Base + TEXT("R")) += Control.Value * Weight;
+	}
+}
+
 bool VIPExpressions::IsKnown(const FString& Emotion)
 {
 	return Recipes().Contains(Emotion.ToLower());

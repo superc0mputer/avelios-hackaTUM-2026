@@ -46,6 +46,9 @@ namespace
 	constexpr float RestFraction = 0.5f;       // resting strength between turns
 	constexpr float MaxIntensity = 2.0f;
 	constexpr float SolverRampPerSecond = 2.5f; // the solver has one mood: fade it out, switch, fade in
+	constexpr float PainSeconds = 1.0f;        // how fast the lasting pain face follows the level
+	constexpr double WinceRise = 0.15, WinceHold = 0.35, WinceFall = 0.9;
+	constexpr float WinceStrength = 0.45f;     // on top of the lasting face, at pain 10
 	constexpr float RestInSeconds = 0.5f;       // mouth closing after speech
 	constexpr float RestOutSeconds = 0.04f;     // solver back in charge when speech starts
 
@@ -151,6 +154,11 @@ void UVIPSpeechSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 		bLogFace = true;
 	}
 	SetEmotion(Emotion, Intensity);
+	float Pain = 0;
+	if (FParse::Value(FCommandLine::Get(), TEXT("VIPPain="), Pain))
+	{
+		SetPain(Pain);
+	}
 
 	// -VIPWide: pull the camera back to see the whole patient (clothing, posture, breathing checks)
 	float Wide = 0;
@@ -179,6 +187,16 @@ void UVIPSpeechSubsystem::ApplyTestStep(const FString& Step)
 	if (Step == TEXT("listening") || Step == TEXT("thinking") || Step == TEXT("idle"))
 	{
 		SetAttention(Step);
+		return;
+	}
+	if (Step.StartsWith(TEXT("pain=")))
+	{
+		SetPain(FCString::Atof(*Step.Mid(5)));
+		return;
+	}
+	if (Step == TEXT("wince"))
+	{
+		WinceStart = FPlatformTime::Seconds() + ShotSettleSeconds - 0.3; // at its peak when the shot is taken
 		return;
 	}
 	if (Step == TEXT("stop"))
@@ -386,6 +404,16 @@ void UVIPSpeechSubsystem::SetAttention(const FString& State)
 	UE_LOG(LogVIP, Display, TEXT("Attention %s"), *Attention);
 }
 
+void UVIPSpeechSubsystem::SetPain(float InLevel)
+{
+	PainLevel = FMath::Clamp(InLevel, 0.0f, 10.0f);
+	if (PainLevel < 3)
+	{
+		NextWince = 0;
+	}
+	UE_LOG(LogVIP, Display, TEXT("Pain %.1f"), PainLevel);
+}
+
 void UVIPSpeechSubsystem::StopSpeaking()
 {
 	if (Queue)
@@ -463,6 +491,32 @@ void UVIPSpeechSubsystem::UpdateEmotion(float DeltaTime)
 		Weight = Approach(Weight, Name == TargetEmotion ? 1.0f : 0.0f, DeltaTime, CrossfadeSeconds);
 		VIPExpressions::Add(Name, Weight * Level, Offsets);
 	}
+	// Pain: a lasting face that follows the level, and short winces now and then from pain 3
+	PainShown = Approach(PainShown, FMath::Pow(PainLevel / 10.0f, 0.8f), DeltaTime, PainSeconds);
+	float Wince = 0;
+	if (PainLevel >= 3)
+	{
+		if (NextWince == 0)
+		{
+			NextWince = Now + FMath::FRandRange(3.0f, 8.0f);
+		}
+		if (WinceStart < 0 && Now >= NextWince)
+		{
+			WinceStart = Now;
+			NextWince = Now + FMath::FRandRange(6.0f, 16.0f) * (10.0f / PainLevel);
+		}
+	}
+	if (WinceStart >= 0)
+	{
+		const double T = Now - WinceStart;
+		Wince = static_cast<float>(T < WinceRise ? T / WinceRise : T < WinceRise + WinceHold ? 1.0 : FMath::Max(0.0, 1.0 - (T - WinceRise - WinceHold) / WinceFall));
+		if (T > WinceRise + WinceHold + WinceFall)
+		{
+			WinceStart = -1;
+		}
+	}
+	VIPExpressions::AddPain(PainShown + Wince * WinceStrength * FMath::Max(PainLevel, 3.0f) / 10.0f, Offsets);
+
 	// In silence, fade the solver's open-mouthed idle pose out to a closed, relaxed mouth
 	const bool bSpeaking = Now < SpeakingUntil;
 	Rest = Approach(Rest, bSpeaking ? 0.0f : 1.0f, DeltaTime, bSpeaking ? RestOutSeconds : RestInSeconds);
