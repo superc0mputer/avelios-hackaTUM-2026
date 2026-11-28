@@ -96,18 +96,35 @@ cp .env.example .env    # add OPENAI_API_KEY; optional ENGINE_API_KEY, PATIENT_C
 cloudflared tunnel --url http://127.0.0.1:8787   # ElevenLabs needs a public HTTPS URL
 ```
 
-To interview a case made in the teacher UI, run the teacher UI next to it (`cd teacher-ui && python server.py`, `TEACHER_UI_HOST=0.0.0.0` to reach it from another machine), save a case and click **Start conversation**. It loads the case into the voice server (`POST /case`, local only) and opens the ElevenLabs conversation (set `ELEVENLABS_AGENT_ID` in `engine/.env`). Teacher-UI cases are translated to the engine's `PatientConfig` by `engine/case_adapter.py`: first symptom = told freely, other facts = only when asked, secrets = gated; the diagnosis never reaches the patient.
+To interview a case made in the teacher UI, run the teacher UI next to it (`cd teacher-ui && python server.py`, `TEACHER_UI_HOST=0.0.0.0` to reach it from another machine), save a case and click **Start conversation**. It loads the case into the voice server (`POST /case`, local only) and opens a **live interview panel on the same page** (ElevenLabs browser SDK, live transcript; set `ELEVENLABS_AGENT_ID` in `engine/.env`). The microphone only works over **HTTPS** or on `localhost`: serve the teacher UI over HTTPS (e.g. `tailscale serve --https=8446 8765`) and map `/ws` to the voice server on the same host (`tailscale serve --https=8446 --set-path /ws http://127.0.0.1:8787/ws`), so the page can relay the patient's voice to Unreal. Teacher-UI cases are translated to the engine's `PatientConfig` by `engine/case_adapter.py`: first symptom = told freely, other facts = only when asked, secrets = gated; the diagnosis never reaches the patient.
 
 In the ElevenLabs agent: LLM = **Custom LLM**, server URL = `https://<tunnel-host>/v1`, API key = the same value as `ENGINE_API_KEY` (stored as a secret). Leave the agent's own prompt short and the first message empty; the patient waits for the student. Through the tunnel only `/v1/chat/completions`, `/v1/models` and `/health` are reachable. Tests: `.venv/bin/python -m pytest -q tests`.
+
+### Connect the MetaHuman
+
+The patient's voice and emotion reach Unreal through the voice server:
+
+```
+teacher page (ElevenLabs SDK) --audio--> voice server /ws/stage --audio + emotion--> /ws/unreal <-- Unreal (VIPBackendLink)
+```
+
+- Start the voice server on an address Unreal can reach (`--host 0.0.0.0`; `/ws/*` is refused through the public tunnel).
+- Start Unreal with `VIP_SERVER=ws://<voice-server-ip>:8787/ws/unreal unreal/build.sh --run`, or pass `-VIPServer=ws://...` to the editor or the packaged app. Use an IPv4 address (e.g. `127.0.0.1` or the host's Tailscale IP), not `localhost` or a hostname: the voice server listens on IPv4 only, and macOS may try IPv6 first.
+- Messages to Unreal, as JSON text:
+  - `{"type":"audio","sample_rate":16000,"pcm_b64":...}`: the patient's voice as mono 16-bit PCM → `UVIPSpeechSubsystem::Speak`;
+  - `{"type":"emotion","emotion":"sad","intensity":0.6}` → `SetEmotion` (the case's starting mood for now);
+  - `{"type":"interrupt"}`: the student talked over the patient (logged only for now).
+- While an Unreal client is connected, the teacher page mutes its own playback, so the patient speaks only through the MetaHuman.
 
 ## Run the Unreal patient
 
 The repository holds only our project file, config, C++ module and build scripts. The MetaHuman is **rebuilt on your machine** from an Epic preset, so no Epic assets are published.
 
 **You need**
-- macOS (tested on an M4 MacBook Air with 16 GB, Xcode 26.6) or Windows (**not tested yet**; needs Visual Studio 2022 with "Game development with C++"). Linux is not supported.
+- macOS (tested on an M4 MacBook Air with 16 GB, Xcode 26.6, and an M2 Pro MacBook Pro with 16 GB, Xcode 27) or Windows (**not tested yet**; needs Visual Studio 2022 with "Game development with C++"). Linux is not supported.
 - Unreal Engine 5.8 with **MetaHuman Creator Core Data** (Epic Games Launcher → 5.8 → Options)
 - An Epic account signed in through the launcher, and internet: textures and rig come from Epic's online services
+- On Xcode 26 or later, the Metal toolchain (Unreal compiles its shaders with it; without it the first build stops with "missing Metal Toolchain"): `xcodebuild -downloadComponent MetalToolchain`
 - About 5 GB of free disk space (more for packaging), and a short repository path without spaces
 
 macOS:
@@ -122,7 +139,7 @@ Windows (PowerShell, from the repository folder; the policy flag applies to this
 powershell -ExecutionPolicy Bypass -File unreal\build.ps1 -Run
 ```
 
-The first build takes around 10 minutes on the Mac we tested. Later runs skip what is already built. Options on macOS:
+The first build takes around 10 minutes on the Mac we tested (about 15 on a second Mac, with Unreal on a USB drive). During the first step Epic may ask you to sign in; the build waits for it. Building the MetaHuman briefly needs more than 16 GB of memory, so close other heavy apps. Later runs skip what is already built. Options on macOS:
 
 - `unreal/build.sh` builds without opening the window
 - `unreal/build.sh --clean` rebuilds from scratch

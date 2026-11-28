@@ -202,6 +202,44 @@ const ELEVENLABS_CLIENT_URL = 'https://cdn.jsdelivr.net/npm/@elevenlabs/client@1
 let liveAgentId = null;
 let conversation = null;
 const agentBubbles = new Map();
+// The agent's output format: mono 16-bit PCM at this rate (ElevenLabs agent setting).
+const PATIENT_AUDIO_RATE = 16000;
+let stage = null;          // WebSocket to the voice server, relays audio to Unreal
+let unrealListeners = 0;   // MetaHuman clients connected; while > 0 the browser stays silent
+
+// Same origin over HTTPS (tailscale serve maps /ws to the voice server), else the voice server port.
+function stageUrl() {
+  return location.protocol === 'https:'
+    ? 'wss://' + location.host + '/ws/stage'
+    : 'ws://' + location.hostname + ':8787/ws/stage';
+}
+
+function applyUnrealRouting() {
+  if (!conversation) return;
+  conversation.setVolume({ volume: unrealListeners > 0 ? 0 : 1 });
+  $('#conversation-note').textContent = unrealListeners > 0 ? 'The patient speaks through the MetaHuman.' : '';
+}
+
+function openStage() {
+  try {
+    stage = new WebSocket(stageUrl());
+  } catch (error) {
+    stage = null;
+    return;
+  }
+  stage.onmessage = (event) => {
+    const message = JSON.parse(event.data);
+    if (message.type === 'status') {
+      unrealListeners = message.unreal || 0;
+      applyUnrealRouting();
+    }
+  };
+  stage.onclose = () => { stage = null; unrealListeners = 0; applyUnrealRouting(); };
+}
+
+function sendToStage(message) {
+  if (stage && stage.readyState === WebSocket.OPEN) stage.send(JSON.stringify(message));
+}
 
 function setConversationState(state, label) {
   $('#conversation-state').dataset.state = state;
@@ -264,11 +302,16 @@ $('#talk-button').addEventListener('click', async () => {
   setConversationState('connecting', 'Connecting…');
   try {
     const { Conversation } = await import(ELEVENLABS_CLIENT_URL);
+    openStage();
     conversation = await Conversation.startSession({
       agentId: liveAgentId,
+      // WebSocket mode delivers the patient's raw PCM in onAudio, which we relay to Unreal.
+      connectionType: 'websocket',
+      onAudio: (base64Audio) => sendToStage({ type: 'audio', sample_rate: PATIENT_AUDIO_RATE, pcm_b64: base64Audio }),
       onConnect: () => setConversationState('listening', 'Listening'),
       onDisconnect: () => {
         conversation = null;
+        if (stage) stage.close();
         setConversationState('idle', 'Not connected');
         $('#talk-button').hidden = false;
         $('#talk-button').disabled = false;
@@ -285,6 +328,7 @@ $('#talk-button').addEventListener('click', async () => {
     });
     $('#talk-button').hidden = true;
     $('#end-button').hidden = false;
+    applyUnrealRouting();
   } catch (error) {
     conversation = null;
     setConversationState('idle', 'Not connected');

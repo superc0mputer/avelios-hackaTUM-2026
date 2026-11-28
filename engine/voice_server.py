@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 
 from case_adapter import load_patient_config
@@ -50,6 +50,46 @@ FALLBACK_REPLY = "Sorry... could you say that again?"
 TUNNEL_HEADERS = ("cf-connecting-ip", "cf-ray")
 # Routes reachable through the public tunnel (everything else is local/tailnet only).
 PUBLIC_PATHS = {"/v1/chat/completions", "/v1/models", "/health"}
+# Shared emotion names (README, Unreal's SetEmotion); unknown values become neutral.
+EMOTIONS = {"neutral", "happy", "sad", "fear", "disgust", "anger", "surprise"}
+
+
+class StageHub:
+    """Relays the patient's voice and emotion from the browser to Unreal (the MetaHuman).
+
+    * ``/ws/unreal``: Unreal connects here and receives JSON messages
+      ``{"type": "emotion", "emotion": ..., "intensity": ...}`` and
+      ``{"type": "audio", "sample_rate": 16000, "pcm_b64": ...}`` (mono 16-bit PCM).
+    * ``/ws/stage``: the teacher page connects here while a conversation runs and sends
+      the patient's audio chunks from the ElevenLabs SDK. It is told how many Unreal
+      clients listen, so it can mute its own playback while the MetaHuman speaks.
+    """
+
+    def __init__(self) -> None:
+        self.unreal: set[WebSocket] = set()
+        self.stages: set[WebSocket] = set()
+        self.emotion = {"type": "emotion", "emotion": "neutral", "intensity": 0.6}
+
+    async def to_unreal(self, message: dict[str, Any]) -> None:
+        text = json.dumps(message)
+        for ws in list(self.unreal):
+            try:
+                await ws.send_text(text)
+            except Exception:  # closed socket: forget it
+                self.unreal.discard(ws)
+
+    async def status(self) -> None:
+        text = json.dumps({"type": "status", "unreal": len(self.unreal)})
+        for ws in list(self.stages):
+            try:
+                await ws.send_text(text)
+            except Exception:
+                self.stages.discard(ws)
+
+    async def set_emotion(self, emotion: str, intensity: float = 0.6) -> None:
+        emotion = emotion if emotion in EMOTIONS else "neutral"
+        self.emotion = {"type": "emotion", "emotion": emotion, "intensity": max(0.0, min(1.0, intensity))}
+        await self.to_unreal(self.emotion)
 
 
 class PatientSession:
@@ -60,10 +100,13 @@ class PatientSession:
         self.case_path: Path | None = None
         self.config: PatientConfig | None = None
         self.client: ChatActorClient | None = None
+        self.mood = "neutral"
 
     def load(self, source: Path | dict[str, Any]) -> None:
         """Load a case (engine format or teacher-UI format) from a path or a dict."""
-        config = load_patient_config(source)
+        data = source if isinstance(source, dict) else json.loads(Path(source).read_text(encoding="utf-8"))
+        config = load_patient_config(data)
+        self.mood = str((data.get("personality") or {}).get("mood") or "neutral")
         prompt = build_system_prompt(config)
         self.client = self._client_factory(prompt)
         self.config = config
@@ -115,6 +158,7 @@ def _case_path_from_env() -> Path:
 def create_app(session: PatientSession | None = None, *, load_case: bool = True) -> FastAPI:
     app = FastAPI(title="VIP voice server")
     app.state.session = session or PatientSession()
+    app.state.stage = StageHub()
     if load_case:
         app.state.session.load(_case_path_from_env())
 
@@ -166,10 +210,66 @@ def create_app(session: PatientSession | None = None, *, load_case: bool = True)
         except Exception as exc:  # validation errors, bad JSON, LLM client setup
             raise HTTPException(422, f"could not load case: {exc}") from exc
         demo = s.config.demographics
+        # The MetaHuman starts with the case's mood (per-reply emotion comes later).
+        await app.state.stage.set_emotion(s.mood)
         return {
-            "case_id": s.config.case_id, "name": demo.full_name, "age": demo.age,
+            "case_id": s.config.case_id, "name": demo.full_name, "age": demo.age, "mood": s.mood,
             "agent_id": (os.getenv("ELEVENLABS_AGENT_ID") or "").strip() or None, "talk_url": talk_url(),
         }
+
+    def _via_tunnel(ws: WebSocket) -> bool:
+        return any(h in ws.headers for h in TUNNEL_HEADERS)
+
+    @app.websocket("/ws/unreal")
+    async def unreal_socket(ws: WebSocket) -> None:
+        """Unreal (MetaHuman) receives the patient's emotion and voice here. Local/tailnet only."""
+        hub: StageHub = app.state.stage
+        if _via_tunnel(ws):
+            await ws.close(code=1008)
+            return
+        await ws.accept()
+        hub.unreal.add(ws)
+        log.info("unreal connected (%d)", len(hub.unreal))
+        await ws.send_text(json.dumps(hub.emotion))
+        await hub.status()
+        try:
+            while True:
+                await ws.receive_text()  # nothing expected from Unreal; keeps the socket open
+        except WebSocketDisconnect:
+            pass
+        finally:
+            hub.unreal.discard(ws)
+            log.info("unreal disconnected (%d)", len(hub.unreal))
+            await hub.status()
+
+    @app.websocket("/ws/stage")
+    async def stage_socket(ws: WebSocket) -> None:
+        """The teacher page sends the patient's audio here during a conversation."""
+        hub: StageHub = app.state.stage
+        if _via_tunnel(ws):
+            await ws.close(code=1008)
+            return
+        await ws.accept()
+        hub.stages.add(ws)
+        await ws.send_text(json.dumps({"type": "status", "unreal": len(hub.unreal)}))
+        try:
+            while True:
+                message = json.loads(await ws.receive_text())
+                kind = message.get("type")
+                if kind == "audio" and isinstance(message.get("pcm_b64"), str):
+                    await hub.to_unreal({
+                        "type": "audio",
+                        "sample_rate": int(message.get("sample_rate") or 16000),
+                        "pcm_b64": message["pcm_b64"],
+                    })
+                elif kind == "emotion":
+                    await hub.set_emotion(str(message.get("emotion", "neutral")), float(message.get("intensity", 0.6)))
+                elif kind == "interrupt":
+                    await hub.to_unreal({"type": "interrupt"})
+        except (WebSocketDisconnect, ValueError, json.JSONDecodeError):
+            pass
+        finally:
+            hub.stages.discard(ws)
 
     @app.get("/v1/models")
     def models() -> dict[str, Any]:
