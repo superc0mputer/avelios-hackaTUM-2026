@@ -84,6 +84,20 @@ So far only the Unreal patient can be run (see below). Other setup instructions 
 - **Unreal:** version 5.8 (see below).
 - **Questions:** the Avelios mentors are on site all weekend.
 
+## Run the voice patient (ElevenLabs + engine)
+
+ElevenLabs Agents does speech-to-text, turn-taking and the voice. It calls our engine as its **custom LLM** on every turn: `engine/voice_server.py` builds the patient prompt from the case and streams the OpenAI reply back.
+
+```bash
+cd engine
+python -m venv .venv && .venv/bin/pip install -r requirements.txt   # or: uv venv && uv pip install -r requirements.txt
+cp .env.example .env    # add OPENAI_API_KEY; optional ENGINE_API_KEY, PATIENT_CASE_PATH
+.venv/bin/uvicorn voice_server:app --host 127.0.0.1 --port 8787
+cloudflared tunnel --url http://127.0.0.1:8787   # ElevenLabs needs a public HTTPS URL
+```
+
+In the ElevenLabs agent: LLM = **Custom LLM**, server URL = `https://<tunnel-host>/v1`, API key = the same value as `ENGINE_API_KEY` (stored as a secret). Leave the agent's own prompt short and the first message empty; the patient waits for the student. Through the tunnel only `/v1/chat/completions`, `/v1/models` and `/health` are reachable. Tests: `.venv/bin/python -m pytest -q tests`.
+
 ## Run the Unreal patient
 
 The repository holds only our project file, config, C++ module and build scripts. The MetaHuman is **rebuilt on your machine** from an Epic preset, so no Epic assets are published.
