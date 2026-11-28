@@ -160,8 +160,9 @@ On Windows: `powershell -ExecutionPolicy Bypass -File unreal\package.ps1` (not t
 
 ### Demo view (#26)
 
-- Full screen: start the packaged app with `-fullscreen` (standard Unreal flag; not tested yet on the demo machine).
-- Delay Unreal adds: speech is held back 0.12 s so lips and voice line up (`SoundDelaySeconds`); the face starts moving as soon as audio arrives. Not measured end to end yet.
+- Full screen: start the packaged app with `-fullscreen` (standard Unreal flag). Not verified yet: in a test with the Mac's screen locked, the app hung while creating the window (macOS cannot switch to a full-screen Space on a locked screen), while `-windowed` worked. Try it once with the screen unlocked; fallback: `-windowed -resx=<screen width> -resy=<screen height>`.
+- Delay Unreal adds: speech is held back 0.12 s so lips and voice line up (`SoundDelaySeconds`). Measured in the game window on an M4 MacBook Air (10 sentences, `-VIPWav=` runs log `VIP latency:` lines): the jaw opens 74 to 96 ms after `Speak()`, the sound is queued about 120 ms after it, so the mouth leads the sound by 25 to 46 ms plus the audio device's own latency. Viewers tolerate sound slightly after the lips much better than before them. The voice reaches the speakers about 0.13 s later than without Unreal; network and text-to-speech time come on top.
+- Keep the demo machine otherwise idle: with a background process using a full core and a hot machine, the jaw opened 200 to 580 ms after `Speak()`, so the lips trailed the voice by up to 0.45 s.
 - If Unreal fails: the teacher page plays the patient's voice itself whenever no Unreal client is connected to the voice server (#49), so the conversation goes on voice-only.
 - Checked tonight: the packaged app (2.4 GB) loads a case, swaps the patient, plays the body idle and shows signs, breathing, emotions and pain.
 
