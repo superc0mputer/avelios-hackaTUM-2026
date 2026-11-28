@@ -2,6 +2,9 @@
 
 namespace
 {
+	// The recipes were tuned on top of the solver's idle face; at rest that face is faded out (closed
+	// mouth), so the recipes alone need a little more to read at demo distance
+	constexpr float RecipeGain = 1.3f;
 	struct FControl
 	{
 		const TCHAR* Name; // without CTRL_expressions_; "L"/"R" are added unless Sided
@@ -76,11 +79,11 @@ void VIPExpressions::Add(const FString& Emotion, float Weight, TMap<FString, flo
 		const FString Base = FString(TEXT("CTRL_expressions_")) + Control.Name;
 		if (Control.bSided)
 		{
-			Out.FindOrAdd(Base) += Control.Value * Weight;
+			Out.FindOrAdd(Base) += Control.Value * Weight * RecipeGain;
 			continue;
 		}
-		Out.FindOrAdd(Base + TEXT("L")) += Control.Value * Weight;
-		Out.FindOrAdd(Base + TEXT("R")) += Control.Value * Weight;
+		Out.FindOrAdd(Base + TEXT("L")) += Control.Value * Weight * RecipeGain;
+		Out.FindOrAdd(Base + TEXT("R")) += Control.Value * Weight * RecipeGain;
 	}
 }
 

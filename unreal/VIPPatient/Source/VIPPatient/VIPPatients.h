@@ -31,7 +31,8 @@ namespace VIPPatients
 	/**
 	 * Puts the patient that best fits age and gender in the level, replacing the one placed there,
 	 * and lifts the camera and face lights to its head. Empty gender or Age < 0 means "any".
-	 * Returns the patient actor, or the placed one if nothing better is found.
+	 * Returns the patient actor, or the placed one if nothing better is found. OutAge, if given,
+	 * receives the age the chosen patient looks (left unchanged if the placed one stays).
 	 */
-	AActor* Choose(UWorld& World, const FString& Gender, int32 Age);
+	AActor* Choose(UWorld& World, const FString& Gender, int32 Age, int32* OutAge = nullptr);
 }

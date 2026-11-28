@@ -6,6 +6,7 @@
 #include "VIPSpeechSubsystem.generated.h"
 
 class FVIPExpressionLayer;
+class FVIPLife;
 class FVIPSpeechQueue;
 class UMetaHumanAudioBaseLiveLinkSubjectSettings;
 class UAudioComponent;
@@ -81,6 +82,7 @@ private:
 
 	// Emotion: what was asked for, and where the blend currently is
 	TSharedPtr<FVIPExpressionLayer> Expressions;
+	TSharedPtr<FVIPLife> Life;
 	FString TargetEmotion = TEXT("neutral");
 	float TargetIntensity = 0;
 	double EmotionSetAt = 0;

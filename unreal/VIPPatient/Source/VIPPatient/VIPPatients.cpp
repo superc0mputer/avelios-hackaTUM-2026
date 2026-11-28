@@ -42,7 +42,7 @@ namespace
 	}
 }
 
-AActor* VIPPatients::Choose(UWorld& World, const FString& Gender, int32 Age)
+AActor* VIPPatients::Choose(UWorld& World, const FString& Gender, int32 Age, int32* OutAge)
 {
 	AActor* Placed = nullptr;
 	for (TActorIterator<AActor> It(&World); It; ++It)
@@ -99,6 +99,10 @@ AActor* VIPPatients::Choose(UWorld& World, const FString& Gender, int32 Age)
 	}
 	UE_LOG(LogVIPPatients, Display, TEXT("Patient %s (%s, %s, %d) for gender '%s' age %d"),
 		*BestName.ToString(), *Best->Preset, *Best->Gender, Best->Age, *Gender, Age);
+	if (OutAge)
+	{
+		*OutAge = Best->Age;
+	}
 
 	// Patients differ in height: keep the camera and face lights at the same place relative to the head
 	float NewHead = 0;

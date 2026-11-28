@@ -1,6 +1,7 @@
 #include "VIPSpeechSubsystem.h"
 
 #include "VIPExpressions.h"
+#include "VIPLife.h"
 #include "VIPPatients.h"
 #include "VIPSpeechSource.h"
 
@@ -118,6 +119,7 @@ void UVIPSpeechSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	}
 
 	Expressions = MakeShared<FVIPExpressionLayer>();
+	Life = MakeShared<FVIPLife>();
 	StartSource(VoiceSampleRate);
 
 	// Which patient: from the case later (#24); for now from the command line
@@ -125,7 +127,13 @@ void UVIPSpeechSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	int32 Age = -1;
 	FParse::Value(FCommandLine::Get(), TEXT("VIPGender="), Gender);
 	FParse::Value(FCommandLine::Get(), TEXT("VIPAge="), Age);
-	VIPPatients::Choose(InWorld, Gender, Age);
+	int32 LooksAge = 72; // Walter, the patient placed in the level
+	VIPPatients::Choose(InWorld, Gender, Age, &LooksAge);
+
+	// Older patients move less and slower
+	FVIPLifeParams LifeParams;
+	LifeParams.Movement = LooksAge >= 70 ? 0.65f : LooksAge >= 55 ? 0.8f : 1.0f;
+	Life->Set(LifeParams);
 
 	DriveFace();
 
@@ -240,7 +248,7 @@ void UVIPSpeechSubsystem::StartSource(int32 SampleRate)
 	}
 
 	Queue = MakeShared<FVIPSpeechQueue>(SampleRate);
-	TSharedPtr<FVIPSpeechSource> SpeechSource = MakeShared<FVIPSpeechSource>(Queue.ToSharedRef(), Expressions.ToSharedRef());
+	TSharedPtr<FVIPSpeechSource> SpeechSource = MakeShared<FVIPSpeechSource>(Queue.ToSharedRef(), Expressions.ToSharedRef(), Life.ToSharedRef());
 	Features.GetModularFeature<ILiveLinkClient>(ILiveLinkClient::ModularFeatureName).AddSource(SpeechSource);
 	Source = SpeechSource;
 
