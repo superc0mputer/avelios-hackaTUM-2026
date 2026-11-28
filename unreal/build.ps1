@@ -102,7 +102,9 @@ Invoke-Stage "build_scene" "Patient\ConsultationRoom.umap"
 
 Write-Host "Patient ready."
 if ($Run) {
-    & $editorGui $project -game -windowed -resx=1280 -resy=720
+    $serverArg = @()
+    if ($env:VIP_SERVER) { $serverArg = @("-VIPServer=$($env:VIP_SERVER)") }
+    & $editorGui $project -game -windowed -resx=1280 -resy=720 @serverArg
 } else {
     Write-Host "Show it:  unreal\build.ps1 -Run"
 }

@@ -1,0 +1,84 @@
+{
+  "schema_version": "1.2",
+  "case_id": "case-001",
+  "case_pair_id": "stable-angina-due-to-coronary-artery-disease",
+  "character_id": "man-01",
+  "diagnosis": "Stable angina due to coronary artery disease",
+  "patient": {
+    "name": "Martin Keller",
+    "age": 58,
+    "gender": "male",
+    "life_story": "Martin has worked as a vehicle maintenance mechanic for most of his adult life and takes pride in being dependable. He enjoys fixing things at home and walking his dog. He tends to handle problems himself and dislikes missing work or making a fuss."
+  },
+  "personality": {
+    "type": "downplays_everything",
+    "description": "Martin minimizes discomfort, gives short answers at first, and uses dry jokes to deflect worry. He is cooperative when the student is respectful and specific.",
+    "mood": "neutral"
+  },
+  "symptoms": [
+    "Intermittent central chest pressure or tightness began about three months ago; it happens two or three times most weeks and the pattern has not noticeably changed.",
+    "The pressure sometimes spreads toward the left shoulder and upper arm. Each episode lasts about three to five minutes and feels moderate, around five out of ten.",
+    "Episodes come on with brisk walking, hills, carrying heavy items, or cold weather. They settle within about five minutes after he stops and rests.",
+    "He sometimes feels mildly short of breath during an episode. He has no chest discomfort now and has not had episodes while resting or asleep; the last episode was two days ago."
+  ],
+  "medical_history": [
+    "High blood pressure diagnosed about seven years ago.",
+    "High cholesterol diagnosed about two years ago; no previous diagnosed heart attack, angina, or coronary procedure."
+  ],
+  "medications": [
+    "Amlodipine for blood pressure.",
+    "Atorvastatin for high cholesterol.",
+    "Glyceryl trinitrate (GTN) spray prescribed by his GP for the episodes about six weeks ago."
+  ],
+  "allergies": [
+    "No known medication allergies."
+  ],
+  "family_history": [
+    "His father had a heart attack; Martin does not volunteer the exact age at first."
+  ],
+  "lifestyle": [
+    "Lives with his partner, Lena; his adult son lives nearby.",
+    "Usually has one or two beers at the weekend.",
+    "Smokes cigarettes; initially minimizes how much. The amount and duration are held in secrets."
+  ],
+  "secrets": [
+    "Smokes about 20 cigarettes a day and has done so for roughly 30 years.",
+    "His father's heart attack happened when his father was 54.",
+    "Often misses two or three atorvastatin doses in a week.",
+    "Worries that reporting the symptoms could mean time off work or losing his usual duties."
+  ],
+  "evaluation_fact_ids": {
+    "symptoms": [
+      "symptoms-001",
+      "symptoms-002",
+      "symptoms-003",
+      "symptoms-004"
+    ],
+    "medical_history": [
+      "medical_history-001",
+      "medical_history-002"
+    ],
+    "medications": [
+      "medications-001",
+      "medications-002",
+      "medications-003"
+    ],
+    "allergies": [
+      "allergies-001"
+    ],
+    "family_history": [
+      "family_history-001"
+    ],
+    "lifestyle": [
+      "lifestyle-001",
+      "lifestyle-002",
+      "lifestyle-003"
+    ],
+    "secrets": [
+      "secrets-001",
+      "secrets-002",
+      "secrets-003",
+      "secrets-004"
+    ]
+  }
+}
