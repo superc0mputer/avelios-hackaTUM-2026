@@ -46,6 +46,32 @@ namespace
 		}
 		return 0;
 	}
+
+	/** The drawn part of a grabbed frame, scaled to FrameSize (each output pixel averages 4 samples). */
+	TArray<FColor> ScaleDown(const TArray<FColor>& Pixels, FIntPoint Size)
+	{
+		const int32 SrcW = FMath::Max(1, FilledWidth(Pixels, Size));
+		const int32 SrcH = FMath::Clamp(SrcW * Size.Y / Size.X, 1, Size.Y);
+		TArray<FColor> Out;
+		Out.SetNumUninitialized(FrameSize.X * FrameSize.Y);
+		for (int32 Y = 0; Y < FrameSize.Y; ++Y)
+		{
+			const int32 Y0 = Y * SrcH / FrameSize.Y;
+			const int32 Y1 = FMath::Max(Y0, (Y + 1) * SrcH / FrameSize.Y - 1);
+			for (int32 X = 0; X < FrameSize.X; ++X)
+			{
+				const int32 X0 = X * SrcW / FrameSize.X;
+				const int32 X1 = FMath::Max(X0, (X + 1) * SrcW / FrameSize.X - 1);
+				const FColor& A = Pixels[Y0 * Size.X + X0];
+				const FColor& B = Pixels[Y0 * Size.X + X1];
+				const FColor& C = Pixels[Y1 * Size.X + X0];
+				const FColor& D = Pixels[Y1 * Size.X + X1];
+				Out[Y * FrameSize.X + X] = FColor(
+					(A.R + B.R + C.R + D.R) / 4, (A.G + B.G + C.G + D.G) / 4, (A.B + B.B + C.B + D.B) / 4, 255);
+			}
+		}
+		return Out;
+	}
 }
 
 bool UVIPVideoStream::DoesSupportWorldType(const EWorldType::Type WorldType) const
@@ -75,11 +101,15 @@ void UVIPVideoStream::StartCapture()
 	{
 		return; // no game window yet; try again next tick
 	}
-	Grabber = MakeShared<FFrameGrabber>(GameEngine->SceneViewport.ToSharedRef(), FrameSize * CaptureScale);
+	// Grab at the window's own size: smaller buffers come back only partly drawn on Retina
+	// screens. EncodeAndSend scales the picture down to FrameSize.
+	const FIntPoint WindowSize = GameEngine->SceneViewport->GetSizeXY();
+	const FIntPoint GrabSize(FMath::Max(WindowSize.X, FrameSize.X), FMath::Max(WindowSize.Y, FrameSize.Y));
+	Grabber = MakeShared<FFrameGrabber>(GameEngine->SceneViewport.ToSharedRef(), GrabSize);
 	Grabber->StartCapturingFrames();
 	NextFrameAt = 0;
-	UE_LOG(LogVIPVideo, Display, TEXT("Streaming the patient at %dx%d, %.0f fps (screen scale %d)"),
-		FrameSize.X, FrameSize.Y, FramesPerSecond, CaptureScale);
+	UE_LOG(LogVIPVideo, Display, TEXT("Streaming the patient: grabbing %dx%d, sending %dx%d at %.0f fps"),
+		GrabSize.X, GrabSize.Y, FrameSize.X, FrameSize.Y, FramesPerSecond);
 }
 
 void UVIPVideoStream::StopCapture()
@@ -126,38 +156,7 @@ void UVIPVideoStream::Tick(float DeltaTime)
 	if (Frames.Num() > 0 && !bEncoding->load())
 	{
 		FCapturedFrameData& Newest = Frames.Last();
-		const int32 Filled = FilledWidth(Newest.ColorBuffer, Newest.BufferSize);
-		if (Filled > 0 && Filled < FrameSize.X * 9 / 10 && CaptureScale < 4)
-		{
-			// High-DPI screen: grab larger so the filled part is the frame size
-			CaptureScale = FMath::Clamp(CaptureScale * FMath::RoundToInt(float(FrameSize.X) / Filled), CaptureScale + 1, 4);
-			UE_LOG(LogVIPVideo, Display, TEXT("Picture filled %d of %d pixels; grabbing at scale %d"), Filled, Newest.BufferSize.X, CaptureScale);
-			StopCapture(); // the next tick starts again with the larger buffer
-			return;
-		}
-		if (Filled >= Newest.BufferSize.X && CaptureScale > 1)
-		{
-			// Fully drawn after all: cropping would zoom in, so grab at the plain size again
-			CaptureScale = 1;
-			StopCapture();
-			return;
-		}
-		if (Newest.BufferSize == FrameSize)
-		{
-			EncodeAndSend(MoveTemp(Newest.ColorBuffer), FrameSize);
-		}
-		else if (Newest.BufferSize.X >= FrameSize.X && Newest.BufferSize.Y >= FrameSize.Y
-			&& Newest.ColorBuffer.Num() == Newest.BufferSize.X * Newest.BufferSize.Y)
-		{
-			// Keep the top-left FrameSize, where the picture is
-			TArray<FColor> Cropped;
-			Cropped.SetNumUninitialized(FrameSize.X * FrameSize.Y);
-			for (int32 Row = 0; Row < FrameSize.Y; ++Row)
-			{
-				FMemory::Memcpy(&Cropped[Row * FrameSize.X], &Newest.ColorBuffer[Row * Newest.BufferSize.X], FrameSize.X * sizeof(FColor));
-			}
-			EncodeAndSend(MoveTemp(Cropped), FrameSize);
-		}
+		EncodeAndSend(MoveTemp(Newest.ColorBuffer), Newest.BufferSize);
 	}
 }
 
@@ -173,11 +172,12 @@ void UVIPVideoStream::EncodeAndSend(TArray<FColor>&& Pixels, FIntPoint Size)
 
 	Async(EAsyncExecution::ThreadPool, [Pixels = MoveTemp(Pixels), Size, Busy, WeakWorld]() mutable
 	{
+		const TArray<FColor> Small = ScaleDown(Pixels, Size);
 		IImageWrapperModule& Images = FModuleManager::LoadModuleChecked<IImageWrapperModule>(TEXT("ImageWrapper"));
 		const TSharedPtr<IImageWrapper> Jpeg = Images.CreateImageWrapper(EImageFormat::JPEG);
 		TArray64<uint8> Compressed;
 		// FColor is stored as B, G, R, A
-		if (Jpeg.IsValid() && Jpeg->SetRaw(Pixels.GetData(), Pixels.Num() * sizeof(FColor), Size.X, Size.Y, ERGBFormat::BGRA, 8))
+		if (Jpeg.IsValid() && Jpeg->SetRaw(Small.GetData(), Small.Num() * sizeof(FColor), FrameSize.X, FrameSize.Y, ERGBFormat::BGRA, 8))
 		{
 			Compressed = Jpeg->GetCompressed(JpegQuality);
 		}
