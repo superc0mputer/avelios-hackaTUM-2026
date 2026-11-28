@@ -96,3 +96,23 @@ def test_empty_reply_is_not_a_crash(pieces):
     client, _ = make_client(pieces)
     r = client.post("/v1/chat/completions", json={"stream": True, "messages": history()})
     assert r.status_code == 200 and r.text.rstrip().endswith("data: [DONE]")
+
+
+def test_load_teacher_case_and_list(monkeypatch):
+    monkeypatch.setenv("ELEVENLABS_AGENT_ID", "agent_test")
+    client, completions = make_client()
+    listed = client.get("/cases").json()
+    assert any(c["case_id"] == "case-001" for c in listed["cases"])
+
+    r = client.post("/case", json={"case_id": "case-001"})
+    assert r.status_code == 200, r.text
+    assert r.json()["name"] == "Martin Keller"
+    assert r.json()["talk_url"].endswith("agent_id=agent_test")
+    assert client.get("/health").json()["case_id"] == "case-001"
+
+    client.post("/v1/chat/completions", json={"messages": history()})
+    assert "Martin Keller" in completions.calls[-1]["messages"][0]["content"]
+
+    assert client.post("/case", json={"case_id": "nope"}).status_code == 404
+    # Loading cases is local only, never through the public tunnel.
+    assert client.post("/case", json={"case_id": "case-001"}, headers={"cf-ray": "x"}).status_code == 403

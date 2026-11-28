@@ -33,6 +33,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 
+from case_adapter import load_patient_config
 from llm_client import ChatActorClient, LLMClientError
 from models import PatientConfig
 from prompt_builder import build_system_prompt
@@ -41,7 +42,9 @@ load_dotenv()
 log = logging.getLogger("voice_server")
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-DEFAULT_CASE_PATH = Path(__file__).resolve().parent / "data" / "mock_gerhard_mueller.json"
+ENGINE_DATA_DIR = Path(__file__).resolve().parent / "data"
+TEACHER_CASES_DIR = Path(__file__).resolve().parents[1] / "cases"
+DEFAULT_CASE_PATH = ENGINE_DATA_DIR / "mock_gerhard_mueller.json"
 FALLBACK_REPLY = "Sorry... could you say that again?"
 # Requests that come through a Cloudflare tunnel carry these headers.
 TUNNEL_HEADERS = ("cf-connecting-ip", "cf-ray")
@@ -58,13 +61,50 @@ class PatientSession:
         self.config: PatientConfig | None = None
         self.client: ChatActorClient | None = None
 
-    def load(self, case_path: Path) -> None:
-        config = PatientConfig.from_json_file(case_path)
+    def load(self, source: Path | dict[str, Any]) -> None:
+        """Load a case (engine format or teacher-UI format) from a path or a dict."""
+        config = load_patient_config(source)
         prompt = build_system_prompt(config)
         self.client = self._client_factory(prompt)
         self.config = config
-        self.case_path = case_path
+        self.case_path = source if isinstance(source, Path) else None
         log.info("loaded case %s (%s) with model %s", config.case_id, config.demographics.full_name, self.client.model)
+
+
+def list_cases() -> list[dict[str, Any]]:
+    """Cases from the teacher UI (cases/) and the engine's mock data (engine/data/)."""
+    found = []
+    for folder in (TEACHER_CASES_DIR, ENGINE_DATA_DIR):
+        for path in sorted(folder.glob("*.json")):
+            if path.name.endswith(".schema.json"):
+                continue
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                config = load_patient_config(data)
+            except Exception as exc:  # invalid or unrelated JSON: list it with the error
+                found.append({"case_id": path.stem, "file": path.name, "error": str(exc)[:200]})
+                continue
+            demo = config.demographics
+            found.append({"case_id": config.case_id, "file": path.name, "name": demo.full_name, "age": demo.age})
+    return found
+
+
+def find_case_file(case_id: str) -> Path | None:
+    for folder in (TEACHER_CASES_DIR, ENGINE_DATA_DIR):
+        for path in folder.glob("*.json"):
+            if path.stem == case_id:
+                return path
+            try:
+                if json.loads(path.read_text(encoding="utf-8")).get("case_id") == case_id:
+                    return path
+            except (OSError, ValueError, AttributeError):
+                continue
+    return None
+
+
+def talk_url() -> str | None:
+    agent = (os.getenv("ELEVENLABS_AGENT_ID") or "").strip()
+    return f"https://elevenlabs.io/app/talk-to?agent_id={agent}" if agent else None
 
 
 def _case_path_from_env() -> Path:
@@ -96,6 +136,39 @@ def create_app(session: PatientSession | None = None, *, load_case: bool = True)
             "ok": s.client is not None,
             "case_id": s.config.case_id if s.config else None,
             "model": s.client.model if s.client else None,
+        }
+
+    @app.get("/cases")
+    def cases() -> dict[str, Any]:
+        s: PatientSession = app.state.session
+        return {"loaded": s.config.case_id if s.config else None, "cases": list_cases()}
+
+    @app.post("/case")
+    async def load_case_route(request: Request) -> dict[str, Any]:
+        """Load the case to interview next: {"case_id": "case-003"} or {"case": {...}}.
+
+        Local/tailnet only (blocked through the tunnel). ElevenLabs' next turn uses it.
+        """
+        body = await request.json()
+        s: PatientSession = app.state.session
+        try:
+            if isinstance(body.get("case"), dict):
+                s.load(body["case"])
+            elif body.get("case_id"):
+                path = find_case_file(str(body["case_id"]))
+                if path is None:
+                    raise HTTPException(404, f"case {body['case_id']!r} not found")
+                s.load(path)
+            else:
+                raise HTTPException(400, 'send {"case_id": ...} or {"case": {...}}')
+        except HTTPException:
+            raise
+        except Exception as exc:  # validation errors, bad JSON, LLM client setup
+            raise HTTPException(422, f"could not load case: {exc}") from exc
+        demo = s.config.demographics
+        return {
+            "case_id": s.config.case_id, "name": demo.full_name, "age": demo.age,
+            "agent_id": (os.getenv("ELEVENLABS_AGENT_ID") or "").strip() or None, "talk_url": talk_url(),
         }
 
     @app.get("/v1/models")

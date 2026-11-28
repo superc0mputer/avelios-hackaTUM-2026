@@ -1,6 +1,7 @@
 const $ = (selector) => document.querySelector(selector);
 
 const disclosureProfiles = {
+  no_preference: 'An ordinary, cooperative patient; shares secrets once the student asks respectfully and specifically.',
   downplays_everything: 'Minimizes at first; secrets emerge after specific, respectful follow-up.',
   anxious_talkative: 'Volunteers context and may digress; secrets need empathetic, focused follow-up.',
   shy_reserved: 'Gives brief answers at first; opens up with gentle rapport.',
@@ -26,6 +27,7 @@ const stepHints = [
 ];
 let currentStep = 0;
 let toastTimer;
+let savedCaseId = null;
 
 function linesFrom(id) {
   return document.getElementById(id).value.split('\n').map((line) => line.trim()).filter(Boolean);
@@ -184,12 +186,118 @@ $('#case-form').addEventListener('submit', async (event) => {
     }
     $('#status').textContent = 'Saved ' + result.saved_as;
     showToast('Saved ' + result.saved_as);
+    savedCaseId = result.case_id;
+    $('#start-button').hidden = false;
   } catch (error) {
     $('#status').textContent = error.message;
     showToast(error.message, true);
   } finally {
     button.disabled = false;
   }
+});
+
+// ---- Live interview: load the saved case, then talk to the patient in this page ----
+// ElevenLabs browser SDK, loaded on demand (pinned version).
+const ELEVENLABS_CLIENT_URL = 'https://cdn.jsdelivr.net/npm/@elevenlabs/client@1.36.1/+esm';
+let liveAgentId = null;
+let conversation = null;
+const agentBubbles = new Map();
+
+function setConversationState(state, label) {
+  $('#conversation-state').dataset.state = state;
+  $('#conversation-state').textContent = label;
+}
+
+function addBubble(role, text, responseId) {
+  const log = $('#conversation-log');
+  log.querySelector('.conversation-empty')?.remove();
+  let bubble = responseId ? agentBubbles.get(responseId) : null;
+  if (!bubble) {
+    bubble = document.createElement('div');
+    bubble.className = 'bubble ' + (role === 'agent' ? 'agent' : 'user');
+    bubble.innerHTML = '<small></small><span></span>';
+    bubble.querySelector('small').textContent = role === 'agent' ? 'Patient' : 'You';
+    log.appendChild(bubble);
+    if (responseId) agentBubbles.set(responseId, bubble);
+  }
+  bubble.querySelector('span').textContent = text;
+  log.scrollTop = log.scrollHeight;
+}
+
+$('#start-button').addEventListener('click', async () => {
+  if (!savedCaseId) return;
+  const button = $('#start-button');
+  button.disabled = true;
+  $('#status').textContent = 'Loading the patient…';
+  try {
+    const response = await fetch('/api/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ case_id: savedCaseId }),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Could not start the conversation.');
+    liveAgentId = result.agent_id;
+    $('#status').textContent = 'Live now: ' + result.name + ', ' + result.age;
+    $('#conversation-patient').textContent = 'Live now: ' + result.name + ', ' + result.age;
+    $('#talk-link').href = result.talk_url || '#';
+    $('#talk-link').hidden = !result.talk_url;
+    $('#conversation-note').textContent = liveAgentId ? '' : 'Set ELEVENLABS_AGENT_ID in engine/.env to talk in the browser.';
+    $('#conversation-panel').hidden = false;
+    $('#conversation-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (error) {
+    $('#status').textContent = error.message;
+    showToast(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+$('#talk-button').addEventListener('click', async () => {
+  if (!liveAgentId || conversation) return;
+  if (!window.isSecureContext) {
+    $('#conversation-note').textContent = 'The microphone only works over HTTPS (or localhost). Open this page through its https:// address.';
+    return;
+  }
+  $('#talk-button').disabled = true;
+  $('#conversation-note').textContent = '';
+  setConversationState('connecting', 'Connecting…');
+  try {
+    const { Conversation } = await import(ELEVENLABS_CLIENT_URL);
+    conversation = await Conversation.startSession({
+      agentId: liveAgentId,
+      onConnect: () => setConversationState('listening', 'Listening'),
+      onDisconnect: () => {
+        conversation = null;
+        setConversationState('idle', 'Not connected');
+        $('#talk-button').hidden = false;
+        $('#talk-button').disabled = false;
+        $('#end-button').hidden = true;
+      },
+      onModeChange: ({ mode }) => setConversationState(mode, mode === 'speaking' ? 'Patient is speaking' : 'Listening'),
+      onMessage: (payload) => {
+        const role = payload.role || (payload.source === 'ai' ? 'agent' : 'user');
+        addBubble(role, payload.message, role === 'agent' ? payload.response_id : null);
+      },
+      onError: (message) => {
+        $('#conversation-note').textContent = String(message || 'Conversation error.');
+      },
+    });
+    $('#talk-button').hidden = true;
+    $('#end-button').hidden = false;
+  } catch (error) {
+    conversation = null;
+    setConversationState('idle', 'Not connected');
+    $('#conversation-note').textContent = error && error.name === 'NotAllowedError'
+      ? 'Microphone access was blocked. Allow it in the browser and try again.'
+      : 'Could not start the conversation: ' + (error && error.message ? error.message : error);
+  } finally {
+    $('#talk-button').disabled = false;
+  }
+});
+
+$('#end-button').addEventListener('click', async () => {
+  if (conversation) await conversation.endSession();
 });
 
 $('#mood').value = 'neutral';

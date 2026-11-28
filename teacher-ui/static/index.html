@@ -75,6 +75,7 @@
           <p class="section-intro">Personality shapes how the patient responds and how readily they share difficult facts.</p>
           <div class="grid two">
             <label class="field"><span>Personality <b>*</b></span><select id="personality-type" required>
+              <option value="no_preference" selected>No preference (ordinary patient)</option>
               <option value="downplays_everything">Downplays everything</option>
               <option value="anxious_talkative">Anxious and talkative</option>
               <option value="shy_reserved">Shy and reserved</option>
@@ -110,9 +111,30 @@
             <button class="back-button" id="back-button" type="button" hidden>← Back</button>
             <button class="save-button" id="next-button" type="button">Continue <span>→</span></button>
             <button class="save-button" id="save-button" type="submit" hidden>Validate &amp; save <span>✓</span></button>
+            <button class="save-button" id="start-button" type="button" hidden>Start conversation <span>→</span></button>
           </div>
         </div>
       </form>
+
+      <section class="card conversation-panel" id="conversation-panel" hidden aria-labelledby="conversation-title">
+        <div class="conversation-head">
+          <div>
+            <p class="eyebrow">LIVE INTERVIEW</p>
+            <h2 id="conversation-title">Talk to the patient</h2>
+            <p class="section-intro" id="conversation-patient"></p>
+          </div>
+          <span class="conversation-state" id="conversation-state" data-state="idle">Not connected</span>
+        </div>
+        <div class="conversation-log" id="conversation-log" aria-live="polite">
+          <p class="conversation-empty">Click <b>Start talking</b>, allow the microphone and greet the patient. The patient waits for you to speak first.</p>
+        </div>
+        <div class="conversation-actions">
+          <button class="save-button" id="talk-button" type="button">Start talking</button>
+          <button class="back-button" id="end-button" type="button" hidden>End conversation</button>
+          <a class="conversation-link" id="talk-link" target="_blank" rel="noopener">Open in ElevenLabs instead</a>
+        </div>
+        <p class="conversation-note" id="conversation-note"></p>
+      </section>
       <div class="toast" id="toast" role="status" aria-live="polite"></div>
     </main>
   </body>

@@ -96,6 +96,8 @@ cp .env.example .env    # add OPENAI_API_KEY; optional ENGINE_API_KEY, PATIENT_C
 cloudflared tunnel --url http://127.0.0.1:8787   # ElevenLabs needs a public HTTPS URL
 ```
 
+To interview a case made in the teacher UI, run the teacher UI next to it (`cd teacher-ui && python server.py`, `TEACHER_UI_HOST=0.0.0.0` to reach it from another machine), save a case and click **Start conversation**. It loads the case into the voice server (`POST /case`, local only) and opens the ElevenLabs conversation (set `ELEVENLABS_AGENT_ID` in `engine/.env`). Teacher-UI cases are translated to the engine's `PatientConfig` by `engine/case_adapter.py`: first symptom = told freely, other facts = only when asked, secrets = gated; the diagnosis never reaches the patient.
+
 In the ElevenLabs agent: LLM = **Custom LLM**, server URL = `https://<tunnel-host>/v1`, API key = the same value as `ENGINE_API_KEY` (stored as a secret). Leave the agent's own prompt short and the first message empty; the patient waits for the student. Through the tunnel only `/v1/chat/completions`, `/v1/models` and `/health` are reachable. Tests: `.venv/bin/python -m pytest -q tests`.
 
 ## Run the Unreal patient

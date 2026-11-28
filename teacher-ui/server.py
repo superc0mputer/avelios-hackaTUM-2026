@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
 import unicodedata
+import urllib.error
+import urllib.request
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
@@ -17,7 +20,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 STATIC_ROOT = Path(__file__).resolve().parent / "static"
 CASES_ROOT = PROJECT_ROOT / "cases"
 SCHEMA_PATH = CASES_ROOT / "patient-case.schema.json"
-PORT = 8765
+HOST = os.getenv("TEACHER_UI_HOST", "127.0.0.1")
+PORT = int(os.getenv("TEACHER_UI_PORT", "8765"))
+# The engine's voice server (engine/voice_server.py); "Start conversation" loads the case there.
+VOICE_SERVER_URL = os.getenv("VOICE_SERVER_URL", "http://127.0.0.1:8787").rstrip("/")
 MAX_REQUEST_BYTES = 1_000_000
 SAVE_LOCK = threading.Lock()
 
@@ -109,7 +115,11 @@ class TeacherHandler(SimpleHTTPRequestHandler):
         super().do_GET()
 
     def do_POST(self):
-        if urlparse(self.path).path != "/api/cases":
+        route = urlparse(self.path).path
+        if route == "/api/start":
+            self._start_conversation()
+            return
+        if route != "/api/cases":
             self.send_error(404, "Unknown API route")
             return
         try:
@@ -150,8 +160,37 @@ class TeacherHandler(SimpleHTTPRequestHandler):
                 "saved_as": f"cases/{case['case_id']}.json",
                 "case_id": case["case_id"],
                 "case_pair_id": case["case_pair_id"],
-                "title": case["title"],
+                "name": case["patient"]["name"],
             })
+
+    def _start_conversation(self):
+        """Load a saved case into the voice server and return the ElevenLabs talk link."""
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            payload = json.loads(self.rfile.read(length)) if 0 < length <= MAX_REQUEST_BYTES else {}
+        except (ValueError, UnicodeDecodeError):
+            payload = {}
+        case_id = payload.get("case_id") if isinstance(payload, dict) else None
+        if not case_id or not re.fullmatch(r"[A-Za-z0-9_-]+", str(case_id)):
+            self._json(400, {"error": "Send the case_id of a saved case."})
+            return
+        request = urllib.request.Request(
+            f"{VOICE_SERVER_URL}/case",
+            data=json.dumps({"case_id": case_id}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                result = json.loads(response.read())
+        except urllib.error.HTTPError as error:
+            detail = error.read().decode("utf-8", "replace")[:300]
+            self._json(502, {"error": f"The voice server could not load the case: {detail}"})
+            return
+        except (urllib.error.URLError, TimeoutError, OSError):
+            self._json(502, {"error": f"The voice server is not running at {VOICE_SERVER_URL}."})
+            return
+        self._json(200, result)
 
     def _json(self, status: int, payload: dict):
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -164,8 +203,8 @@ class TeacherHandler(SimpleHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    server = ThreadingHTTPServer(("127.0.0.1", PORT), TeacherHandler)
-    print(f"Teacher case form: http://127.0.0.1:{PORT}")
+    server = ThreadingHTTPServer((HOST, PORT), TeacherHandler)
+    print(f"Teacher case form: http://{HOST}:{PORT}")
     print(f"New cases are saved in: {CASES_ROOT}")
     try:
         server.serve_forever()

@@ -1106,3 +1106,34 @@ input:focus, select:focus, textarea:focus {
   .avatar-window { min-height: 225px; }
   .section { padding: 22px 19px; border-radius: 14px; }
 }
+
+/* Live interview panel (in-page ElevenLabs conversation) */
+.conversation-panel { margin-top: 22px; }
+.conversation-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.conversation-head h2 { margin: 0 0 4px; }
+.conversation-state {
+  flex: none; padding: 5px 10px; border: 1px solid var(--line); border-radius: 999px;
+  color: var(--muted); font-size: 11px; font-weight: 650; background: var(--white);
+}
+.conversation-state::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: #b8c4cd; vertical-align: 1px; }
+.conversation-state[data-state="listening"]::before { background: var(--teal); }
+.conversation-state[data-state="speaking"]::before { background: var(--blue); }
+.conversation-state[data-state="connecting"]::before { background: #d8a24a; }
+.conversation-log {
+  display: flex; flex-direction: column; gap: 8px; max-height: 360px; margin: 16px 0; padding: 14px;
+  overflow-y: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--paper);
+}
+.conversation-empty { margin: 0; color: var(--muted); font-size: 12px; }
+.bubble { max-width: 80%; padding: 8px 12px; border-radius: 12px; font-size: 13px; line-height: 1.45; }
+.bubble small { display: block; margin-bottom: 2px; color: var(--muted); font-size: 10px; font-weight: 650; }
+.bubble.user { align-self: flex-end; background: var(--white); border: 1px solid var(--line); }
+.bubble.agent { align-self: flex-start; background: var(--mint); }
+.conversation-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.conversation-link { margin-left: auto; color: var(--blue); font-size: 11px; }
+.conversation-note { margin: 10px 0 0; color: #b35f53; font-size: 11px; }
+.conversation-note:empty { display: none; }
+@media (max-width: 640px) {
+  .conversation-head { flex-direction: column; }
+  .bubble { max-width: 92%; }
+  .conversation-link { margin-left: 0; }
+}
