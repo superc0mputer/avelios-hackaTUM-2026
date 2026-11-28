@@ -187,6 +187,7 @@ $('#case-form').addEventListener('submit', async (event) => {
     $('#status').textContent = 'Saved ' + result.saved_as;
     showToast('Saved ' + result.saved_as);
     savedCaseId = result.case_id;
+    loadSavedCases();
     $('#start-button').hidden = false;
   } catch (error) {
     $('#status').textContent = error.message;
@@ -262,16 +263,43 @@ function addBubble(role, text, responseId) {
   log.scrollTop = log.scrollHeight;
 }
 
-$('#start-button').addEventListener('click', async () => {
-  if (!savedCaseId) return;
-  const button = $('#start-button');
+async function loadSavedCases() {
+  try {
+    const response = await fetch('/api/cases');
+    if (!response.ok) return;
+    const { cases } = await response.json();
+    const select = $('#saved-case');
+    select.replaceChildren(...cases.map((c) => {
+      const option = document.createElement('option');
+      option.value = c.case_id;
+      option.textContent = c.name + ', ' + c.age + '  (' + c.case_id + ')';
+      return option;
+    }));
+    if (cases.length) select.value = cases[cases.length - 1].case_id;  // newest first choice
+    $('#saved-patients').hidden = cases.length === 0;
+  } catch (error) {
+    // The picker is optional; the form still works without it
+  }
+}
+loadSavedCases();
+
+$('#saved-start').addEventListener('click', () => {
+  const caseId = $('#saved-case').value;
+  if (caseId) startConversation(caseId, $('#saved-start'));
+});
+
+$('#start-button').addEventListener('click', () => {
+  if (savedCaseId) startConversation(savedCaseId, $('#start-button'));
+});
+
+async function startConversation(caseId, button) {
   button.disabled = true;
   $('#status').textContent = 'Loading the patient…';
   try {
     const response = await fetch('/api/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ case_id: savedCaseId }),
+      body: JSON.stringify({ case_id: caseId }),
     });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || 'Could not start the conversation.');
@@ -289,7 +317,7 @@ $('#start-button').addEventListener('click', async () => {
   } finally {
     button.disabled = false;
   }
-});
+}
 
 $('#talk-button').addEventListener('click', async () => {
   if (!liveAgentId || conversation) return;

@@ -58,6 +58,19 @@ def make_evaluation_ids(case: dict) -> dict[str, list[str]]:
     }
 
 
+def saved_cases() -> list[dict]:
+    """Saved cases for the "talk to a saved patient" picker (no diagnosis: students may see the page)."""
+    cases = []
+    for path in sorted(CASES_ROOT.glob("case-*.json")):
+        try:
+            case = json.loads(path.read_text(encoding="utf-8"))
+            patient = case["patient"]
+            cases.append({"case_id": case["case_id"], "name": patient["name"], "age": patient["age"]})
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+    return cases
+
+
 def build_case(payload: dict, case_id: str) -> dict:
     diagnosis = payload["diagnosis"].strip()
     patient = payload["patient"]
@@ -106,6 +119,9 @@ class TeacherHandler(SimpleHTTPRequestHandler):
         path = urlparse(self.path).path
         if path == "/api/next-id":
             self._json(200, {"case_id": next_case_id()})
+            return
+        if path == "/api/cases":
+            self._json(200, {"cases": saved_cases()})
             return
         if path.startswith("/api/"):
             self.send_error(404, "Unknown API route")
