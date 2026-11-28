@@ -4,43 +4,42 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#f5f8fa">
-    <title>VIP · Create a patient case</title>
+    <title>VIP · Virtual Interview Patient</title>
     <link rel="stylesheet" href="/styles.css">
     <script src="/app.js" defer></script>
   </head>
   <body>
     <header class="topbar">
       <a class="brand" href="/" aria-label="VIP Case Studio home"><span class="brand-mark">V</span><span><strong>VIP</strong><small>Case Studio</small></span></a>
-      <div class="top-context"><i></i> Local authoring workspace</div>
-      <button class="top-tag keys-toggle" id="keys-toggle" type="button" hidden>API KEYS</button>
-      <span class="top-tag">TEACHER TOOL</span>
+      <div class="top-context"><i></i><span id="top-context-label">Virtual patient learning</span></div>
+      <button class="top-tag" id="switch-role-button" type="button" hidden>SWITCH ROLE</button>
     </header>
 
     <main class="page-shell">
-      <section class="card section keys-panel" id="keys-panel" hidden aria-labelledby="keys-title">
-        <p class="eyebrow">FIRST START</p>
-        <h2 id="keys-title">Add your own API keys</h2>
-        <p class="section-intro">The patient thinks with OpenAI and speaks with ElevenLabs, using <b>your</b> accounts. The keys are stored encrypted on this computer only and are sent only to OpenAI and ElevenLabs. To make the voice work, the app also stores your OpenAI key as a secret in your ElevenLabs workspace and creates one agent there called “VIP Patient (local app)”.</p>
-        <form id="keys-form" class="grid two" autocomplete="off">
-          <label class="field"><span>OpenAI API key <b>*</b></span><input id="openai-key" type="password" placeholder="sk-…" spellcheck="false"><small id="openai-key-state"></small></label>
-          <label class="field"><span>ElevenLabs API key <b>*</b></span><input id="elevenlabs-key" type="password" placeholder="Paste your ElevenLabs key" spellcheck="false"><small id="elevenlabs-key-state"></small></label>
-          <div class="field full keys-actions">
-            <button class="save-button" id="keys-save" type="submit">Check &amp; save keys <span>✓</span></button>
-            <button class="back-button" id="keys-forget" type="button">Forget keys on this computer</button>
-          </div>
-        </form>
-        <p class="conversation-note" id="keys-note"></p>
+      <section class="role-screen" id="role-screen" aria-labelledby="role-title">
+        <div class="role-hero"><p class="eyebrow">VIRTUAL INTERVIEW PATIENT</p><h1 id="role-title">Welcome to your<br><span>practice space.</span></h1><p>Choose how you’d like to use VIP today.</p></div>
+        <div class="role-cards">
+          <button class="role-card teacher-role" data-role="teacher" type="button">
+            <span class="role-icon" aria-hidden="true"><svg viewBox="0 0 48 48" fill="none"><path d="M8 13.5c5-2.1 10.3-1.8 16 1v23c-5.7-2.8-11-3.1-16-1v-23Z"/><path d="M40 13.5c-5-2.1-10.3-1.8-16 1v23c5.7-2.8 11-3.1 16-1v-23Z"/><path d="M14 20h5m-5 6h5m10-6h5m-5 6h5"/><path d="M24 14v24"/></svg></span>
+            <span class="role-card-copy"><strong>I’m a teacher</strong><small>Create patient cases, review student work, and leave feedback.</small></span><span class="role-arrow">→</span>
+          </button>
+          <button class="role-card student-role" data-role="student" type="button">
+            <span class="role-icon" aria-hidden="true"><svg viewBox="0 0 48 48" fill="none"><path d="M24 7 40 13v11c0 10-6.6 15.7-16 19-9.4-3.3-16-9-16-19V13l16-6Z"/><path d="M24 16v16m-8-8h16"/></svg></span>
+            <span class="role-card-copy"><strong>I’m a student</strong><small>Meet a patient, practise an interview, and record your findings.</small></span><span class="role-arrow">→</span>
+          </button>
+        </div>
+        <p class="role-footnote">No account needed · Choose a role to continue</p>
       </section>
 
-      <section class="card section examples-panel" id="examples-panel" hidden aria-labelledby="examples-title">
-        <p class="eyebrow">QUICK START</p>
-        <h2 id="examples-title">Talk to an example patient</h2>
-        <p class="section-intro">Pick a ready-made case, or create your own below.</p>
-        <div class="keys-actions">
-          <select id="example-case" aria-label="Example patient"></select>
-          <button class="save-button" id="example-start" type="button">Start conversation <span>→</span></button>
-        </div>
-      </section>
+      <div class="teacher-shell" id="teacher-shell" hidden>
+        <aside class="app-sidebar">
+          <div class="sidebar-label">TEACHER WORKSPACE</div>
+          <button class="sidebar-link active" data-teacher-tab="cases" type="button"><span>＋</span> Create a case</button>
+          <button class="sidebar-link" data-teacher-tab="dashboard" type="button"><span>▤</span> Student responses <i id="response-count">0</i></button>
+          <div class="sidebar-bottom"><span class="sidebar-avatar">T</span><span><strong>Teacher space</strong><small>Local demo workspace</small></span></div>
+        </aside>
+        <div class="teacher-content">
+      <div id="authoring-screen">
       <section class="page-heading">
         <div class="hero-copy">
           <p class="eyebrow">CASE AUTHORING</p>
@@ -136,29 +135,82 @@
             <button class="back-button" id="back-button" type="button" hidden>← Back</button>
             <button class="save-button" id="next-button" type="button">Continue <span>→</span></button>
             <button class="save-button" id="save-button" type="submit" hidden>Validate &amp; save <span>✓</span></button>
-            <button class="save-button" id="start-button" type="button" hidden>Start conversation <span>→</span></button>
           </div>
         </div>
       </form>
+      </div>
+      <section class="teacher-dashboard" id="teacher-dashboard" hidden aria-labelledby="teacher-dashboard-title">
+        <div class="dashboard-heading"><div><p class="eyebrow">TEACHER WORKSPACE</p><h1 id="teacher-dashboard-title">Student responses</h1><p>Review each interview and add a grade or feedback.</p></div><button class="save-button" id="dashboard-create-case" type="button">＋ Create case</button></div>
+        <div class="dashboard-stats"><article><span>Total responses</span><strong id="stat-responses">0</strong></article><article><span>Awaiting review</span><strong id="stat-ungraded">0</strong></article><article><span>Patient cases</span><strong id="stat-cases">0</strong></article></div>
+        <div class="dashboard-layout"><section class="response-list-card"><div class="list-card-heading"><h2>Recent interviews</h2><span id="dashboard-refresh-label">All submissions</span></div><div id="response-list" class="response-list"></div></section><section class="grading-card" id="grading-card"><div class="grading-empty"><span>✎</span><h2>Select a response</h2><p>Choose a student interview to review their findings and leave feedback.</p></div><form id="grading-form" hidden><input type="hidden" id="grading-submission-id"><p class="eyebrow">REVIEW SUBMISSION</p><h2 id="grading-student-title">Student</h2><p class="grading-case" id="grading-case-title"></p><div class="student-answer-read"><strong>Student’s suspected disease</strong><p id="review-disease"></p></div><div class="student-answer-read"><strong>Symptoms recorded</strong><p id="review-symptoms"></p></div><div class="student-answer-read"><strong>Notes and reasoning</strong><p id="review-notes"></p></div><div class="answer-key"><strong>Case diagnosis</strong><span id="review-correct-diagnosis"></span></div><label class="field grade-field"><span>Grade</span><select id="teacher-grade" required><option value="">Select grade</option><option value="1">1 · Excellent</option><option value="2">2 · Good</option><option value="3">3 · Satisfactory</option><option value="4">4 · Sufficient</option><option value="5">5 · Insufficient</option></select></label><label class="field grade-field"><span>Feedback for student</span><textarea id="teacher-feedback" rows="4" placeholder="Add feedback on clinical reasoning and communication"></textarea></label><button class="save-button" id="save-grade-button" type="submit">Save review</button></form></section></div>
+      </section>
+        </div>
+      </div>
 
-      <section class="card conversation-panel" id="conversation-panel" hidden aria-labelledby="conversation-title">
-        <div class="conversation-head">
-          <div>
-            <p class="eyebrow">LIVE INTERVIEW</p>
-            <h2 id="conversation-title">Talk to the patient</h2>
-            <p class="section-intro" id="conversation-patient"></p>
+      <section class="student-cases-screen" id="student-cases-screen" hidden aria-labelledby="student-cases-title">
+        <div class="student-home-heading"><div><p class="eyebrow">STUDENT PRACTICE</p><h1 id="student-cases-title">Choose a patient</h1><p>Each case is a chance to practise listening, reasoning, and clear communication.</p></div><label class="student-name-entry"><span>Your name or ID</span><input id="student-display-name" placeholder="Enter your name or student ID"></label></div>
+        <div id="student-case-list" class="student-case-grid"></div>
+      </section>
+
+      <section class="briefing-screen" id="briefing-screen" hidden aria-labelledby="briefing-title">
+        <div class="timer-bar"><button class="back-button" id="briefing-back-button" type="button">← All patients</button><div class="timer-pill"><span>READ TIME</span><strong id="briefing-timer">02:00</strong></div></div>
+        <article class="briefing-card"><p class="eyebrow">PATIENT BRIEFING</p><h1 id="briefing-title">Before you begin</h1><p class="briefing-intro">Take a moment to meet the person you’ll be speaking with. The interview begins when the timer ends.</p><div class="briefing-patient"><div class="briefing-avatar" id="briefing-avatar"><span id="briefing-avatar-initials">?</span></div><div><p class="eyebrow">YOUR PATIENT</p><h2 id="briefing-name">Patient name</h2><p id="briefing-demographics"></p></div></div><p class="briefing-note">Use these two minutes to prepare. The patient’s medical details will come from your conversation.</p><div class="briefing-footer"><span>Interview starts automatically when time is up</span><button class="save-button" id="begin-interview-button" type="button">Start interview now →</button></div></article>
+      </section>
+
+      <section class="interview-screen" id="interview-screen" hidden aria-labelledby="interview-title">
+        <div class="interview-topline">
+          <div><p class="eyebrow">STUDENT PRACTICE</p><h1 id="interview-title">Patient interview</h1></div>
+          <div class="interview-tools"><div class="timer-pill interview-timer"><span>TIME LEFT</span><strong id="interview-timer">10:00</strong></div><button class="back-button" id="end-interview-button" type="button">Finish interview</button></div>
+        </div>
+        <div class="practice-layout">
+          <section class="patient-workspace" aria-labelledby="practice-patient-name">
+            <div class="patient-stage" id="patient-stage">
+              <div class="stage-avatar" id="stage-avatar" data-character-id="man-01" aria-hidden="true">
+                <div class="avatar-hair"></div>
+                <div class="avatar-head"><i class="eye eye-left"></i><i class="eye eye-right"></i><i class="avatar-mouth"></i></div>
+                <div class="avatar-neck"></div><div class="avatar-body"></div>
+              </div>
+              <div class="stage-label" id="stage-label"><span class="stage-dot"></span><span id="unreal-stage-status">Unreal character preview</span></div>
+              <div class="stage-placeholder">The selected character is shown here. Unreal renders the live MetaHuman in the connected Unreal display.</div>
+            </div>
+            <div class="patient-identity">
+              <div><p class="eyebrow">YOUR PATIENT</p><h2 id="practice-patient-name">Patient name</h2><p id="practice-patient-summary"></p></div>
+              <span class="character-tag" id="practice-character-tag">Character 01</span>
+            </div>
+          </section>
+          <aside class="student-notes-panel" aria-labelledby="student-notes-title">
+            <div class="student-notes-heading">
+              <div><p class="eyebrow">INTERVIEW NOTES</p><h2 id="student-notes-title">Your findings</h2></div>
+            </div>
+            <p class="student-notes-intro">Record what you learn and what you think. Choose your own questions during the interview.</p>
+            <form id="student-notes-form">
+              <input id="student-name" type="hidden">
+              <label class="field student-answer"><span>Disease <b>*</b></span><input id="student-diagnosis" required placeholder="What do you think the patient has?"></label>
+              <label class="field student-answer"><span>Symptoms <b>*</b></span><textarea id="student-symptoms" required rows="4" placeholder="Write down the symptoms you uncovered"></textarea></label>
+              <label class="field student-answer"><span>Notes / reasoning <small>(optional)</small></span><textarea id="student-notes" rows="4" placeholder="Add details or explain how you reached your conclusion"></textarea></label>
+              <button class="save-button submit-notes" id="submit-notes" type="submit">Submit findings <span>→</span></button>
+            </form>
+            <section class="submission-summary" id="submission-summary" hidden aria-live="polite">
+              <div class="submission-mark">✓</div><h3>Interview notes saved</h3><p id="submission-path"></p><p>Your professor can review your disease, symptoms, and reasoning alongside the case.</p>
+            </section>
+          </aside>
+        </div>
+        <section class="conversation-card conversation-testing" aria-labelledby="conversation-title">
+          <div class="conversation-head">
+            <div><h3 id="conversation-title">Conversation test panel</h3><p id="conversation-patient">Start by introducing yourself and inviting the patient to speak.</p></div>
+            <span class="conversation-state" id="conversation-state" data-state="idle">Not connected</span>
           </div>
-          <span class="conversation-state" id="conversation-state" data-state="idle">Not connected</span>
-        </div>
-        <div class="conversation-log" id="conversation-log" aria-live="polite">
-          <p class="conversation-empty">Click <b>Start talking</b>, allow the microphone and greet the patient. The patient waits for you to speak first.</p>
-        </div>
-        <div class="conversation-actions">
-          <button class="save-button" id="talk-button" type="button">Start talking</button>
-          <button class="back-button" id="end-button" type="button" hidden>End conversation</button>
-          <a class="conversation-link" id="talk-link" target="_blank" rel="noopener">Open in ElevenLabs instead</a>
-        </div>
-        <p class="conversation-note" id="conversation-note"></p>
+          <div class="conversation-log" id="conversation-log" aria-live="polite">
+            <p class="conversation-empty">The patient is waiting. Start the interview when you are ready.</p>
+          </div>
+          <div class="conversation-actions">
+            <button class="save-button" id="talk-button" type="button" disabled>Start talking</button>
+            <button class="back-button" id="end-button" type="button" hidden>End conversation</button>
+            <button class="back-button" id="retry-load-button" type="button" hidden>Reconnect patient</button>
+            <a class="conversation-link" id="talk-link" target="_blank" rel="noopener" hidden>Open in ElevenLabs</a>
+          </div>
+          <p class="conversation-note" id="conversation-note"></p>
+        </section>
       </section>
       <div class="toast" id="toast" role="status" aria-live="polite"></div>
     </main>

@@ -1,0 +1,38 @@
+{
+  "schema_version": "1.2",
+  "case_id": "case-004",
+  "case_pair_id": "gverb",
+  "character_id": "man-01",
+  "diagnosis": "gverb",
+  "patient": {
+    "name": "jhcbuwj",
+    "age": 45,
+    "gender": "male",
+    "life_story": "gveg"
+  },
+  "personality": {
+    "type": "no_preference",
+    "description": "eggveg",
+    "mood": "neutral"
+  },
+  "symptoms": [
+    "gegvdbedvs"
+  ],
+  "medical_history": [],
+  "medications": [],
+  "allergies": [],
+  "family_history": [],
+  "lifestyle": [],
+  "secrets": [],
+  "evaluation_fact_ids": {
+    "symptoms": [
+      "symptoms-001"
+    ],
+    "medical_history": [],
+    "medications": [],
+    "allergies": [],
+    "family_history": [],
+    "lifestyle": [],
+    "secrets": []
+  }
+}
