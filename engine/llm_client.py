@@ -8,13 +8,21 @@ from typing import Any
 from dotenv import load_dotenv
 from openai import OpenAI, OpenAIError
 
-DEFAULT_MODEL = "gpt-4o-mini"
+DEFAULT_MODEL = "gpt-6-luna"
 DEFAULT_TEMPERATURE = 0.7
 DEFAULT_MAX_TOKENS = 250
+DEFAULT_REASONING_EFFORT = "none"
+_REASONING_MODEL_PREFIXES = ("gpt-6", "gpt-5", "o1", "o3", "o4")
 
 
 class LLMClientError(RuntimeError):
     """Raised when the LLM client cannot be initialized or fails during a turn."""
+
+
+def _supports_reasoning_effort(model: str) -> bool:
+    """Return True if the model family supports the OpenAI reasoning_effort parameter."""
+    normalized = model.strip().lower().rsplit("/", 1)[-1]
+    return normalized.startswith(_REASONING_MODEL_PREFIXES)
 
 
 def _resolve_temperature(temperature: float | None) -> float:
@@ -32,6 +40,21 @@ def _resolve_temperature(temperature: float | None) -> float:
         ) from exc
 
 
+def _resolve_reasoning_effort(reasoning_effort: str | None, model: str) -> str | None:
+    """Resolve reasoning effort from argument, environment, or model-aware default."""
+    if reasoning_effort is not None:
+        cleaned = reasoning_effort.strip()
+        if not cleaned:
+            raise ValueError("reasoning_effort must not be empty.")
+        return cleaned
+    raw_effort = os.getenv("OPENAI_REASONING_EFFORT")
+    if raw_effort is not None and raw_effort.strip():
+        return raw_effort.strip()
+    if _supports_reasoning_effort(model):
+        return DEFAULT_REASONING_EFFORT
+    return None
+
+
 class ChatActorClient:
     """Stateful multi-turn chat wrapper around the official OpenAI SDK."""
 
@@ -44,6 +67,7 @@ class ChatActorClient:
         base_url: str | None = None,
         temperature: float | None = None,
         max_tokens: int = DEFAULT_MAX_TOKENS,
+        reasoning_effort: str | None = None,
         client: Any | None = None,
     ) -> None:
         load_dotenv()
@@ -59,6 +83,7 @@ class ChatActorClient:
         self._model = resolved_model
         self._temperature = _resolve_temperature(temperature)
         self._max_tokens = max_tokens
+        self._reasoning_effort = _resolve_reasoning_effort(reasoning_effort, resolved_model)
         self._system_prompt = cleaned_prompt
 
         if client is not None:
@@ -80,6 +105,11 @@ class ChatActorClient:
     def model(self) -> str:
         """Return the configured OpenAI chat model name."""
         return self._model
+
+    @property
+    def reasoning_effort(self) -> str | None:
+        """Return the configured reasoning effort level, if any."""
+        return self._reasoning_effort
 
     @property
     def system_prompt(self) -> str:
@@ -108,13 +138,18 @@ class ChatActorClient:
 
         pending_messages = [*self._messages, {"role": "user", "content": cleaned}]
 
+        request_kwargs: dict[str, Any] = {
+            "model": self._model,
+            "messages": pending_messages,
+            "max_completion_tokens": self._max_tokens,
+        }
+        if self._reasoning_effort is not None:
+            request_kwargs["reasoning_effort"] = self._reasoning_effort
+        if self._reasoning_effort in (None, "none"):
+            request_kwargs["temperature"] = self._temperature
+
         try:
-            response = self._client.chat.completions.create(
-                model=self._model,
-                messages=pending_messages,
-                temperature=self._temperature,
-                max_tokens=self._max_tokens,
-            )
+            response = self._client.chat.completions.create(**request_kwargs)
         except OpenAIError as exc:
             raise LLMClientError(f"OpenAI API request failed: {exc}") from exc
 
