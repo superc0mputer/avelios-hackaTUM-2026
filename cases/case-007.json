@@ -1,0 +1,50 @@
+{
+  "schema_version": "1.2",
+  "case_id": "case-007",
+  "case_pair_id": "bwrba",
+  "character_id": "man-01",
+  "diagnosis": "bwrba",
+  "patient": {
+    "name": "VEA",
+    "age": 23,
+    "gender": "male",
+    "life_story": "cbgbwrbs"
+  },
+  "personality": {
+    "type": "no_preference",
+    "description": "abwrbaf",
+    "mood": "neutral"
+  },
+  "symptoms": [
+    "rwbrgwnbr"
+  ],
+  "medical_history": [
+    "brwbs"
+  ],
+  "medications": [
+    "rwtnbtrw"
+  ],
+  "allergies": [
+    "rwbna"
+  ],
+  "family_history": [],
+  "lifestyle": [],
+  "secrets": [],
+  "evaluation_fact_ids": {
+    "symptoms": [
+      "symptoms-001"
+    ],
+    "medical_history": [
+      "medical_history-001"
+    ],
+    "medications": [
+      "medications-001"
+    ],
+    "allergies": [
+      "allergies-001"
+    ],
+    "family_history": [],
+    "lifestyle": [],
+    "secrets": []
+  }
+}

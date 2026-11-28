@@ -28,6 +28,198 @@ const stepHints = [
 let currentStep = 0;
 let toastTimer;
 let savedCaseId = null;
+let savedCaseData = null;
+let activeRole = null;
+let timerHandle = null;
+let activeSubmission = false;
+const STUDENT_CASES_KEY = 'vip-completed-cases';
+
+function showOnly(screenId) {
+  ['role-screen', 'teacher-shell', 'student-cases-screen', 'briefing-screen', 'interview-screen']
+    .forEach((id) => { $('#' + id).hidden = id !== screenId; });
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function stopTimer() {
+  if (timerHandle) clearInterval(timerHandle);
+  timerHandle = null;
+}
+
+function runTimer(seconds, outputId, onDone) {
+  stopTimer();
+  let remaining = seconds;
+  const paint = () => {
+    const minutes = Math.floor(remaining / 60).toString().padStart(2, '0');
+    const secondsLeft = (remaining % 60).toString().padStart(2, '0');
+    $('#' + outputId).textContent = minutes + ':' + secondsLeft;
+  };
+  paint();
+  timerHandle = setInterval(() => {
+    remaining -= 1;
+    paint();
+    if (remaining <= 0) {
+      stopTimer();
+      onDone();
+    }
+  }, 1000);
+}
+
+function selectRole(role) {
+  activeRole = role;
+  $('#switch-role-button').hidden = false;
+  $('#top-context-label').textContent = role === 'teacher' ? 'Teacher workspace' : 'Student practice';
+  $('#switch-role-button').textContent = 'SWITCH ROLE';
+  if (role === 'teacher') {
+    showOnly('teacher-shell');
+    $('#switch-role-button').textContent = 'TEACHER · SWITCH';
+    showTeacherTab('cases');
+  } else {
+    $('#switch-role-button').textContent = 'STUDENT · SWITCH';
+    $('#student-display-name').value = localStorage.getItem('vip-student-name') || '';
+    showOnly('student-cases-screen');
+    loadStudentCases();
+  }
+}
+
+function showTeacherTab(tab) {
+  $('#authoring-screen').hidden = tab !== 'cases';
+  $('#teacher-dashboard').hidden = tab !== 'dashboard';
+  document.querySelectorAll('[data-teacher-tab]').forEach((button) => {
+    button.classList.toggle('active', button.dataset.teacherTab === tab);
+  });
+  if (tab === 'dashboard') loadTeacherDashboard();
+}
+
+function completedCaseIds() {
+  try { return new Set(JSON.parse(localStorage.getItem(STUDENT_CASES_KEY) || '[]')); }
+  catch { return new Set(); }
+}
+
+async function loadStudentCases() {
+  const list = $('#student-case-list');
+  list.replaceChildren();
+  try {
+    const response = await fetch('/api/student-cases');
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Could not load the patient list.');
+    const completed = completedCaseIds();
+    if (!result.cases.length) {
+      list.innerHTML = '<div class="empty-state"><span>✦</span><h2>No patients are ready yet</h2><p>Your teacher will add practice cases here.</p></div>';
+      return;
+    }
+    result.cases.forEach((patient, index) => {
+      const done = completed.has(patient.case_id);
+      const card = document.createElement('article');
+      card.className = 'student-case-card' + (done ? ' completed' : '');
+      const avatar = document.createElement('div');
+      avatar.className = 'case-avatar';
+      avatar.dataset.characterId = patient.character_id || '';
+      avatar.textContent = patient.name.split(/\s+/).map((part) => part[0]).slice(0, 2).join('').toUpperCase();
+      const copy = document.createElement('div');
+      copy.className = 'student-case-copy';
+      const eyebrow = document.createElement('p');
+      eyebrow.className = 'eyebrow';
+      eyebrow.textContent = 'PATIENT ' + String(index + 1).padStart(2, '0');
+      const name = document.createElement('h2');
+      name.textContent = patient.name;
+      const detail = document.createElement('p');
+      detail.textContent = [patient.age ? patient.age + ' years old' : '', patient.gender].filter(Boolean).join(' · ');
+      copy.append(eyebrow, name, detail);
+      const start = document.createElement('button');
+      start.className = done ? 'case-complete-button' : 'save-button';
+      start.type = 'button';
+      start.textContent = done ? 'Completed ✓' : 'Start case →';
+      start.disabled = done;
+      start.addEventListener('click', () => openBriefing(patient.case_id));
+      card.append(avatar, copy, start);
+      list.append(card);
+    });
+  } catch (error) {
+    showToast(error.message, true);
+  }
+}
+
+async function openBriefing(caseId) {
+  const studentName = $('#student-display-name').value.trim();
+  if (!studentName) {
+    $('#student-display-name').focus();
+    showToast('Enter your name or ID before starting a patient.', true);
+    return;
+  }
+  localStorage.setItem('vip-student-name', studentName);
+  try {
+    const response = await fetch('/api/briefing?case_id=' + encodeURIComponent(caseId));
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Could not load the patient briefing.');
+    savedCaseId = caseId;
+    activeSubmission = false;
+    savedCaseData = { patient: result.patient, character_id: result.character_id };
+    $('#briefing-name').textContent = result.patient.name;
+    $('#briefing-demographics').textContent = [result.patient.age ? result.patient.age + ' years old' : '', result.patient.gender].filter(Boolean).join(' · ');
+    $('#briefing-avatar-initials').textContent = result.patient.name.split(/\s+/).map((part) => part[0]).slice(0, 2).join('').toUpperCase();
+    $('#briefing-avatar').dataset.characterId = result.character_id || '';
+    showOnly('briefing-screen');
+    runTimer(120, 'briefing-timer', beginStudentInterview);
+  } catch (error) {
+    showToast(error.message, true);
+  }
+}
+
+function beginStudentInterview() {
+  if (!savedCaseId || activeSubmission) return;
+  stopTimer();
+  enterInterviewScreen(savedCaseData, savedCaseId, true);
+}
+
+async function loadTeacherDashboard() {
+  try {
+    const [casesResponse, resultsResponse] = await Promise.all([
+      fetch('/api/cases'), fetch('/api/practice-results'),
+    ]);
+    const caseData = await casesResponse.json();
+    const resultData = await resultsResponse.json();
+    if (!casesResponse.ok || !resultsResponse.ok) throw new Error('Could not load teacher dashboard.');
+    $('#stat-responses').textContent = resultData.submissions.length;
+    $('#stat-ungraded').textContent = resultData.submissions.filter((item) => !item.grade).length;
+    $('#stat-cases').textContent = caseData.cases.length;
+    $('#response-count').textContent = resultData.submissions.length;
+    const list = $('#response-list');
+    list.replaceChildren();
+    if (!resultData.submissions.length) {
+      list.innerHTML = '<div class="empty-state"><span>▤</span><h2>No student responses yet</h2><p>When students finish an interview, their findings will appear here.</p></div>';
+      return;
+    }
+    resultData.submissions.slice().reverse().forEach((submission) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'response-row';
+      button.innerHTML = '<span class="response-mark">' + (submission.grade ? '✓' : '·') + '</span><span class="response-row-copy"><strong></strong><small></small></span><span class="response-grade"></span>';
+      button.querySelector('strong').textContent = submission.student_name || 'Student';
+      button.querySelector('small').textContent = submission.patient_name + ' · ' + submission.case_id;
+      button.querySelector('.response-grade').textContent = submission.grade ? submission.grade + '/5' : 'Review';
+      button.addEventListener('click', () => showSubmissionForGrading(submission, button));
+      list.append(button);
+    });
+  } catch (error) {
+    showToast(error.message, true);
+  }
+}
+
+function showSubmissionForGrading(submission, button) {
+  document.querySelectorAll('.response-row').forEach((row) => row.classList.remove('selected'));
+  button.classList.add('selected');
+  $('.grading-empty').hidden = true;
+  $('#grading-form').hidden = false;
+  $('#grading-submission-id').value = submission.submission_id;
+  $('#grading-student-title').textContent = submission.student_name || 'Student';
+  $('#grading-case-title').textContent = submission.patient_name + ' · ' + submission.case_id;
+  $('#review-disease').textContent = submission.student_diagnosis || 'No disease recorded before time ended.';
+  $('#review-symptoms').textContent = submission.symptoms || 'No symptoms recorded.';
+  $('#review-notes').textContent = submission.notes || 'No notes added.';
+  $('#review-correct-diagnosis').textContent = submission.correct_diagnosis;
+  $('#teacher-grade').value = submission.grade || '';
+  $('#teacher-feedback').value = submission.feedback || '';
+}
 
 function linesFrom(id) {
   return document.getElementById(id).value.split('\n').map((line) => line.trim()).filter(Boolean);
@@ -66,6 +258,68 @@ function showToast(message, error = false) {
   toast.classList.add('show');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => toast.classList.remove('show'), 4500);
+}
+
+function enterInterviewScreen(caseData, caseId, isStudent = false) {
+  savedCaseData = caseData;
+  savedCaseId = caseId;
+  activeSubmission = false;
+  agentBubbles.clear();
+  $('#conversation-log').innerHTML = '<p class="conversation-empty">The patient is waiting. Start the interview when you are ready.</p>';
+  $('#student-notes-form').reset();
+  $('#student-name').value = localStorage.getItem('vip-student-name') || '';
+  $('#student-notes-form').hidden = false;
+  $('#submission-summary').hidden = true;
+  $('#talk-button').hidden = false;
+  $('#talk-button').disabled = true;
+  $('#end-button').hidden = true;
+  $('#retry-load-button').hidden = true;
+  $('#conversation-note').textContent = '';
+  setConversationState('idle', 'Not connected');
+  $('#practice-patient-name').textContent = caseData.patient.name;
+  const genderNames = { male: 'Man', female: 'Woman', non_binary: 'Non-binary' };
+  const gender = genderNames[caseData.patient.gender] || caseData.patient.gender;
+  $('#practice-patient-summary').textContent = caseData.patient.age + ' years · ' + gender;
+  const character = characters.find((item) => item.id === caseData.character_id);
+  $('#practice-character-tag').textContent = character ? character.label : 'Patient character';
+  $('#stage-avatar').dataset.characterId = caseData.character_id || '';
+  $('#stage-label').dataset.connected = 'false';
+  $('#unreal-stage-status').textContent = 'Preview only · Unreal display not connected';
+  $('#conversation-patient').textContent = 'Start by introducing yourself and inviting the patient to speak.';
+  showOnly('interview-screen');
+  $('#interview-screen').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  loadPatient();
+  if (isStudent) runTimer(600, 'interview-timer', () => submitStudentNotes(true));
+}
+
+async function loadPatient() {
+  if (!savedCaseId) return;
+  $('#retry-load-button').hidden = true;
+  $('#talk-button').disabled = true;
+  setConversationState('connecting', 'Preparing patient…');
+  $('#conversation-note').textContent = '';
+  try {
+    const response = await fetch('/api/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ case_id: savedCaseId }),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Could not prepare the patient.');
+    liveAgentId = result.agent_id;
+    $('#conversation-patient').textContent = 'Patient ready: ' + result.name + ', ' + result.age + '. The patient waits for you to speak first.';
+    $('#talk-link').href = result.talk_url || '#';
+    $('#talk-link').hidden = !result.talk_url;
+    $('#talk-button').disabled = !liveAgentId;
+    setConversationState('ready', 'Ready');
+    $('#unreal-stage-status').textContent = 'Preview · ' + (savedCaseData.character_id || 'selected character');
+  } catch (error) {
+    liveAgentId = null;
+    setConversationState('idle', 'Not connected');
+    $('#conversation-note').textContent = error.message;
+    $('#retry-load-button').hidden = false;
+    $('#unreal-stage-status').textContent = 'Preview only · Unreal display not connected';
+  }
 }
 
 function visibleCharacters() {
@@ -170,6 +424,7 @@ $('#back-button').addEventListener('click', () => {
 $('#case-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   if (!validateCurrentStep()) return;
+  const caseData = makeCase();
   const button = $('#save-button');
   button.disabled = true;
   $('#status').textContent = 'Validating and saving…';
@@ -177,7 +432,7 @@ $('#case-form').addEventListener('submit', async (event) => {
     const response = await fetch('/api/cases', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(makeCase()),
+      body: JSON.stringify(caseData),
     });
     const result = await response.json();
     if (!response.ok) {
@@ -185,9 +440,11 @@ $('#case-form').addEventListener('submit', async (event) => {
       throw new Error(details || result.error || 'Could not save the case.');
     }
     $('#status').textContent = 'Saved ' + result.saved_as;
-    showToast('Saved ' + result.saved_as);
-    savedCaseId = result.case_id;
-    $('#start-button').hidden = false;
+    $('#case-form').reset();
+    updateGenderFields();
+    showStep(0);
+    showTeacherTab('dashboard');
+    showToast('Case saved. It is now available to students.');
   } catch (error) {
     $('#status').textContent = error.message;
     showToast(error.message, true);
@@ -218,6 +475,10 @@ function applyUnrealRouting() {
   if (!conversation) return;
   conversation.setVolume({ volume: unrealListeners > 0 ? 0 : 1 });
   $('#conversation-note').textContent = unrealListeners > 0 ? 'The patient speaks through the MetaHuman.' : '';
+  $('#stage-label').dataset.connected = String(unrealListeners > 0);
+  $('#unreal-stage-status').textContent = unrealListeners > 0
+    ? 'Unreal display connected'
+    : 'Preview only · Unreal display not connected';
 }
 
 function openStage() {
@@ -231,10 +492,20 @@ function openStage() {
     const message = JSON.parse(event.data);
     if (message.type === 'status') {
       unrealListeners = message.unreal || 0;
+      $('#stage-label').dataset.connected = String(unrealListeners > 0);
+      $('#unreal-stage-status').textContent = unrealListeners > 0
+        ? 'Unreal display connected'
+        : 'Preview only · Unreal display not connected';
       applyUnrealRouting();
     }
   };
-  stage.onclose = () => { stage = null; unrealListeners = 0; applyUnrealRouting(); };
+  stage.onclose = () => {
+    stage = null;
+    unrealListeners = 0;
+    $('#stage-label').dataset.connected = 'false';
+    $('#unreal-stage-status').textContent = 'Preview only · Unreal display not connected';
+    applyUnrealRouting();
+  };
 }
 
 function sendToStage(message) {
@@ -262,29 +533,110 @@ function addBubble(role, text, responseId) {
   log.scrollTop = log.scrollHeight;
 }
 
-$('#start-button').addEventListener('click', async () => {
-  if (!savedCaseId) return;
-  const button = $('#start-button');
-  button.disabled = true;
-  $('#status').textContent = 'Loading the patient…';
+$('#retry-load-button').addEventListener('click', loadPatient);
+
+async function submitStudentNotes(timedOut = false) {
+  if (activeSubmission) return;
+  if (!timedOut && !$('#student-notes-form').reportValidity()) return;
+  activeSubmission = true;
+  const submit = $('#submit-notes');
+  submit.disabled = true;
+  submit.textContent = 'Saving for professor…';
   try {
-    const response = await fetch('/api/start', {
+    const response = await fetch('/api/practice-results', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ case_id: savedCaseId }),
+      body: JSON.stringify({
+        case_id: savedCaseId,
+        student_name: $('#student-name').value.trim(),
+        student_diagnosis: $('#student-diagnosis').value.trim(),
+        symptoms: $('#student-symptoms').value.trim(),
+        notes: $('#student-notes').value.trim(),
+        timed_out: timedOut,
+      }),
     });
     const result = await response.json();
-    if (!response.ok) throw new Error(result.error || 'Could not start the conversation.');
-    liveAgentId = result.agent_id;
-    $('#status').textContent = 'Live now: ' + result.name + ', ' + result.age;
-    $('#conversation-patient').textContent = 'Live now: ' + result.name + ', ' + result.age;
-    $('#talk-link').href = result.talk_url || '#';
-    $('#talk-link').hidden = !result.talk_url;
-    $('#conversation-note').textContent = liveAgentId ? '' : 'Set ELEVENLABS_AGENT_ID in engine/.env to talk in the browser.';
-    $('#conversation-panel').hidden = false;
-    $('#conversation-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (!response.ok) throw new Error(result.error || 'Could not save your notes.');
+    stopTimer();
+    const completed = completedCaseIds();
+    completed.add(savedCaseId);
+    localStorage.setItem(STUDENT_CASES_KEY, JSON.stringify([...completed]));
+    if (conversation) {
+      try {
+        await conversation.endSession();
+      } catch {
+        // The saved submission remains available even if the voice session closes unexpectedly.
+      }
+    }
+    showToast(timedOut ? 'Time is up. Your interview has been submitted.' : 'Your interview has been submitted.');
+    activeSubmission = false;
+    showOnly('student-cases-screen');
+    loadStudentCases();
   } catch (error) {
-    $('#status').textContent = error.message;
+    showToast(error.message, true);
+    activeSubmission = false;
+    submit.disabled = false;
+    submit.innerHTML = 'Submit findings <span>→</span>';
+  }
+}
+
+$('#student-notes-form').addEventListener('submit', (event) => {
+  event.preventDefault();
+  submitStudentNotes(false);
+});
+
+$('#end-interview-button').addEventListener('click', () => submitStudentNotes(false));
+
+$('#begin-interview-button').addEventListener('click', beginStudentInterview);
+
+$('#briefing-back-button').addEventListener('click', () => {
+  stopTimer();
+  showOnly('student-cases-screen');
+});
+
+document.querySelectorAll('[data-role]').forEach((button) => {
+  button.addEventListener('click', () => selectRole(button.dataset.role));
+});
+
+document.querySelectorAll('[data-teacher-tab]').forEach((button) => {
+  button.addEventListener('click', () => showTeacherTab(button.dataset.teacherTab));
+});
+
+$('#switch-role-button').addEventListener('click', async () => {
+  stopTimer();
+  if (conversation) {
+    try { await conversation.endSession(); } catch { /* leave role picker available */ }
+  }
+  showOnly('role-screen');
+  $('#switch-role-button').hidden = true;
+  $('#top-context-label').textContent = 'Virtual patient learning';
+});
+
+$('#dashboard-create-case').addEventListener('click', () => showTeacherTab('cases'));
+
+$('#student-display-name').addEventListener('input', (event) => {
+  localStorage.setItem('vip-student-name', event.target.value.trim());
+});
+
+$('#grading-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const button = $('#save-grade-button');
+  button.disabled = true;
+  try {
+    const response = await fetch('/api/grade', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        submission_id: $('#grading-submission-id').value,
+        grade: $('#teacher-grade').value,
+        feedback: $('#teacher-feedback').value.trim(),
+      }),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Could not save review.');
+    showToast('Grade and feedback saved.');
+    await loadTeacherDashboard();
+  } catch (error) {
     showToast(error.message, true);
   } finally {
     button.disabled = false;

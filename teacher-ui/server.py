@@ -9,9 +9,10 @@ import threading
 import unicodedata
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from jsonschema import Draft202012Validator
 
@@ -19,6 +20,7 @@ from jsonschema import Draft202012Validator
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 STATIC_ROOT = Path(__file__).resolve().parent / "static"
 CASES_ROOT = PROJECT_ROOT / "cases"
+PRACTICE_RESULTS_ROOT = PROJECT_ROOT / "practice-results"
 SCHEMA_PATH = CASES_ROOT / "patient-case.schema.json"
 HOST = os.getenv("TEACHER_UI_HOST", "127.0.0.1")
 PORT = int(os.getenv("TEACHER_UI_PORT", "8765"))
@@ -31,7 +33,6 @@ FACT_CATEGORIES = (
     "symptoms", "medical_history", "medications", "allergies",
     "family_history", "lifestyle", "secrets",
 )
-
 SCHEMA = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
 Draft202012Validator.check_schema(SCHEMA)
 VALIDATOR = Draft202012Validator(SCHEMA)
@@ -103,9 +104,22 @@ class TeacherHandler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=str(STATIC_ROOT), **kwargs)
 
     def do_GET(self):
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        path = parsed.path
         if path == "/api/next-id":
             self._json(200, {"case_id": next_case_id()})
+            return
+        if path == "/api/student-cases":
+            self._list_student_cases()
+            return
+        if path == "/api/briefing":
+            self._get_student_briefing(parse_qs(parsed.query).get("case_id", [""])[0])
+            return
+        if path == "/api/cases":
+            self._list_teacher_cases()
+            return
+        if path == "/api/practice-results":
+            self._list_practice_results()
             return
         if path.startswith("/api/"):
             self.send_error(404, "Unknown API route")
@@ -118,6 +132,12 @@ class TeacherHandler(SimpleHTTPRequestHandler):
         route = urlparse(self.path).path
         if route == "/api/start":
             self._start_conversation()
+            return
+        if route == "/api/practice-results":
+            self._save_practice_result()
+            return
+        if route == "/api/grade":
+            self._grade_practice_result()
             return
         if route != "/api/cases":
             self.send_error(404, "Unknown API route")
@@ -162,6 +182,185 @@ class TeacherHandler(SimpleHTTPRequestHandler):
                 "case_pair_id": case["case_pair_id"],
                 "name": case["patient"]["name"],
             })
+
+    def _save_practice_result(self):
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            self._json(400, {"error": "Invalid Content-Length."})
+            return
+        if length < 1 or length > MAX_REQUEST_BYTES:
+            self._json(413, {"error": "Submission must be between 1 byte and 1 MB."})
+            return
+        try:
+            payload = json.loads(self.rfile.read(length))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            self._json(400, {"error": "Submission must be valid UTF-8 JSON."})
+            return
+        if not isinstance(payload, dict):
+            self._json(400, {"error": "Submission must be a JSON object."})
+            return
+
+        case_id = str(payload.get("case_id", "")).strip()
+        student_name = str(payload.get("student_name", "")).strip()
+        diagnosis = str(payload.get("student_diagnosis", "")).strip()
+        symptoms = str(payload.get("symptoms", "")).strip()
+        notes = str(payload.get("notes", "")).strip()
+        timed_out = bool(payload.get("timed_out", False))
+        if not re.fullmatch(r"case-[0-9]{3,}", case_id) or not (CASES_ROOT / f"{case_id}.json").is_file():
+            self._json(404, {"error": "The case for this interview could not be found."})
+            return
+        if not student_name or len(student_name) > 120:
+            self._json(422, {"error": "Enter a student name or ID (up to 120 characters)."})
+            return
+        if (not diagnosis and not timed_out) or len(diagnosis) > 500:
+            self._json(422, {"error": "Enter your likely disease (up to 500 characters)."})
+            return
+        if (not symptoms and not timed_out) or len(symptoms) > 5000 or len(notes) > 5000:
+            self._json(422, {"error": "Enter the symptoms you found and keep each text field under 5,000 characters."})
+            return
+
+        with SAVE_LOCK:
+            PRACTICE_RESULTS_ROOT.mkdir(parents=True, exist_ok=True)
+            numbers = []
+            for path in PRACTICE_RESULTS_ROOT.glob("submission-*.json"):
+                match = re.fullmatch(r"submission-(\d+)\.json", path.name)
+                if match:
+                    numbers.append(int(match.group(1)))
+            submission_id = f"submission-{max(numbers, default=0) + 1:03d}"
+            record = {
+                "submission_id": submission_id,
+                "case_id": case_id,
+                "student_name": student_name,
+                "submitted_at": datetime.now(timezone.utc).isoformat(),
+                "student_diagnosis": diagnosis,
+                "symptoms": symptoms,
+                "notes": notes,
+                "timed_out": timed_out,
+                "grade": None,
+                "feedback": "",
+            }
+            destination = PRACTICE_RESULTS_ROOT / f"{submission_id}.json"
+            with destination.open("x", encoding="utf-8") as stream:
+                json.dump(record, stream, ensure_ascii=False, indent=2)
+                stream.write("\n")
+        self._json(201, {
+            "submission_id": submission_id,
+            "saved_as": f"practice-results/{submission_id}.json",
+        })
+
+    def _list_student_cases(self):
+        cases = []
+        for path in sorted(CASES_ROOT.glob("case-*.json")):
+            try:
+                case = json.loads(path.read_text(encoding="utf-8"))
+                patient = case["patient"]
+            except (OSError, json.JSONDecodeError, KeyError, TypeError):
+                continue
+            cases.append({
+                "case_id": case.get("case_id", path.stem),
+                "name": patient.get("name", "Patient"),
+                "age": patient.get("age"),
+                "gender": patient.get("gender", ""),
+                "mood": case.get("personality", {}).get("mood", "neutral"),
+                "character_id": case.get("character_id", ""),
+            })
+        self._json(200, {"cases": cases})
+
+    def _get_student_briefing(self, case_id):
+        if not re.fullmatch(r"case-[0-9]{3,}", case_id):
+            self._json(400, {"error": "Choose a valid patient case."})
+            return
+        path = CASES_ROOT / f"{case_id}.json"
+        try:
+            case = json.loads(path.read_text(encoding="utf-8"))
+            patient = case["patient"]
+        except (OSError, json.JSONDecodeError, KeyError, TypeError):
+            self._json(404, {"error": "Patient case not found."})
+            return
+        # The student briefing deliberately excludes story, symptoms, diagnosis, and personality.
+        self._json(200, {
+            "case_id": case_id,
+            "patient": {
+                "name": patient.get("name", "Patient"),
+                "age": patient.get("age"),
+                "gender": patient.get("gender", ""),
+            },
+            "character_id": case.get("character_id", ""),
+        })
+
+    def _list_teacher_cases(self):
+        cases = []
+        submissions = self._read_submissions()
+        counts = {}
+        for result in submissions:
+            counts[result.get("case_id")] = counts.get(result.get("case_id"), 0) + 1
+        for path in sorted(CASES_ROOT.glob("case-*.json")):
+            try:
+                case = json.loads(path.read_text(encoding="utf-8"))
+                patient = case["patient"]
+            except (OSError, json.JSONDecodeError, KeyError, TypeError):
+                continue
+            cases.append({
+                "case_id": case.get("case_id", path.stem),
+                "name": patient.get("name", "Patient"),
+                "age": patient.get("age"),
+                "diagnosis": case.get("diagnosis", ""),
+                "submissions": counts.get(case.get("case_id", path.stem), 0),
+            })
+        self._json(200, {"cases": cases})
+
+    def _read_submissions(self):
+        results = []
+        for path in sorted(PRACTICE_RESULTS_ROOT.glob("submission-*.json")):
+            try:
+                result = json.loads(path.read_text(encoding="utf-8"))
+                case_path = CASES_ROOT / f"{result.get('case_id', '')}.json"
+                case = json.loads(case_path.read_text(encoding="utf-8")) if case_path.is_file() else {}
+                result["patient_name"] = case.get("patient", {}).get("name", "Unknown patient")
+                result["correct_diagnosis"] = case.get("diagnosis", "")
+                results.append(result)
+            except (OSError, json.JSONDecodeError, TypeError):
+                continue
+        return results
+
+    def _list_practice_results(self):
+        self._json(200, {"submissions": self._read_submissions()})
+
+    def _grade_practice_result(self):
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            payload = json.loads(self.rfile.read(length)) if 0 < length <= MAX_REQUEST_BYTES else {}
+        except (ValueError, UnicodeDecodeError):
+            self._json(400, {"error": "Grade update must be valid JSON."})
+            return
+        if not isinstance(payload, dict):
+            self._json(400, {"error": "Grade update must be a JSON object."})
+            return
+        submission_id = str(payload.get("submission_id", ""))
+        if not re.fullmatch(r"submission-[0-9]{3,}", submission_id):
+            self._json(400, {"error": "Choose a valid student submission."})
+            return
+        try:
+            grade = int(payload.get("grade"))
+        except (ValueError, TypeError):
+            self._json(422, {"error": "Choose a grade from 1 to 5."})
+            return
+        feedback = str(payload.get("feedback", "")).strip()
+        if not 1 <= grade <= 5 or len(feedback) > 5000:
+            self._json(422, {"error": "Grade must be 1–5 and feedback no longer than 5,000 characters."})
+            return
+        target = PRACTICE_RESULTS_ROOT / f"{submission_id}.json"
+        if not target.is_file():
+            self._json(404, {"error": "Student submission not found."})
+            return
+        with SAVE_LOCK:
+            result = json.loads(target.read_text(encoding="utf-8"))
+            result["grade"] = grade
+            result["feedback"] = feedback
+            result["graded_at"] = datetime.now(timezone.utc).isoformat()
+            target.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        self._json(200, {"submission_id": submission_id, "grade": grade})
 
     def _start_conversation(self):
         """Load a saved case into the voice server and return the ElevenLabs talk link."""
