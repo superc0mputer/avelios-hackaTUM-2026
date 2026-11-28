@@ -1144,3 +1144,10 @@ input:focus, select:focus, textarea:focus {
 .metahuman-toggle { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 12px; }
 .metahuman-toggle[hidden] { display: none; }
 .metahuman-toggle small { color: var(--muted); }
+
+.patient-video { margin: 0 0 12px; position: relative; border-radius: 10px; overflow: hidden; background: #0e1a23; aspect-ratio: 16 / 9; }
+.patient-video[hidden] { display: none; }
+.patient-video img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.patient-video img:not([src]) { visibility: hidden; }
+.patient-video figcaption { position: absolute; inset: auto 0 0 0; padding: 6px 10px; color: #dfe7ec; font-size: 11px; background: linear-gradient(transparent, #0008); }
+.patient-video figcaption:empty { display: none; }

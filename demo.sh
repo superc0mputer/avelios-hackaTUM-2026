@@ -215,6 +215,11 @@ if [ "$(uname -s)" = Darwin ]; then open "$page"
 elif [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && command -v xdg-open > /dev/null; then xdg-open "$page" || true; fi
 echo
 echo "Ready: $page  (Ctrl+C stops everything)"
+if [ -n "$(env_value PUBLIC_ACCESS_CODE)" ]; then
+  # Anyone with this link and the code from engine/.env can test in their browser (changes on every start)
+  echo "Public link for testers: $url  (access code: PUBLIC_ACCESS_CODE in engine/.env)"
+  echo "$url" > "$root/.demo/public-url"
+fi
 [ "$unreal" = 1 ] && echo "The patient window opens in about a minute; the page mutes itself once it is connected."
 
 # Stay up until Ctrl+C or a server dies. Closing the Unreal window keeps the servers running.

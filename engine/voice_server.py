@@ -16,22 +16,31 @@ Environment (engine/.env):
     PATIENT_CASE_PATH   case JSON (default: data/mock_gerhard_mueller.json)
     ENGINE_API_KEY      optional; if set, /v1/* requires "Authorization: Bearer <key>"
                         (store the same value as the agent's custom-LLM API key secret)
+    PUBLIC_ACCESS_CODE  optional; if set, the teacher page (forwarded from TEACHER_UI_URL) and
+                        the live patient video are reachable through the tunnel for anyone
+                        who enters this code. Without it the tunnel serves ElevenLabs only.
 """
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
+import hmac
+import html
 import json
 import logging
 import os
 import time
 import uuid
+from urllib.parse import parse_qs
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
+import httpx
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
 
 from case_adapter import load_patient_config
 from llm_client import ChatActorClient, LLMClientError
@@ -48,11 +57,60 @@ DEFAULT_CASE_PATH = ENGINE_DATA_DIR / "mock_gerhard_mueller.json"
 FALLBACK_REPLY = "Sorry... could you say that again?"
 # Requests that come through a Cloudflare tunnel carry these headers.
 TUNNEL_HEADERS = ("cf-connecting-ip", "cf-ray")
-# Routes reachable through the public tunnel (everything else is local/tailnet only).
 ATTENTION_STATES = {"listening", "thinking", "idle"}
+# Routes ElevenLabs uses through the public tunnel (/v1/* also needs ENGINE_API_KEY).
 PUBLIC_PATHS = {"/v1/chat/completions", "/v1/models", "/health"}
+# Never through the tunnel, not even with the access code: the prompt holds the case's secrets.
+PRIVATE_PATHS = {"/prompt", "/cases", "/case"}
+# The teacher page, forwarded for testers who come through the tunnel with the access code.
+TEACHER_UI_URL = os.getenv("TEACHER_UI_URL", "http://127.0.0.1:8765").rstrip("/")
+ACCESS_COOKIE = "vip_access"
 # Shared emotion names (README, Unreal's SetEmotion); unknown values become neutral.
 EMOTIONS = {"neutral", "happy", "sad", "fear", "disgust", "anger", "surprise"}
+
+
+def access_code() -> str:
+    return (os.getenv("PUBLIC_ACCESS_CODE") or "").strip()
+
+
+def access_token(code: str) -> str:
+    """Cookie value for testers who entered the code (the code itself never goes in a cookie)."""
+    return hmac.new(code.encode(), b"vip-access", hashlib.sha256).hexdigest()
+
+
+def has_access(cookies: dict[str, str]) -> bool:
+    code = access_code()
+    return bool(code) and hmac.compare_digest(cookies.get(ACCESS_COOKIE, ""), access_token(code))
+
+
+ACCESS_PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>VIP · Access</title>
+<style>body{{font:15px system-ui,sans-serif;background:#f5f8fa;color:#17252f;display:grid;place-items:center;min-height:100vh;margin:0}}
+form{{background:#fff;padding:28px;border-radius:12px;box-shadow:0 2px 12px #0001;width:min(340px,90vw)}}
+h1{{font-size:18px;margin:0 0 6px}}p{{color:#5b6b76;margin:0 0 16px}}input{{width:100%;box-sizing:border-box;padding:10px;border:1px solid #c9d4dc;border-radius:8px;font:inherit}}
+button{{margin-top:12px;width:100%;padding:11px;border:0;border-radius:8px;background:#164e78;color:#fff;font:inherit;font-weight:600;cursor:pointer}}.err{{color:#b3261e}}</style></head>
+<body><form method="post" action="/access"><h1>VIP · Virtual Interview Patient</h1><p>Enter the access code you were given.</p>
+{error}<input name="code" type="password" autocomplete="current-password" autofocus aria-label="Access code"><button>Open</button></form></body></html>"""
+
+
+class VideoViewer:
+    """One browser watching the patient video. Keeps only the newest frame: a slow viewer skips frames."""
+
+    def __init__(self, ws: WebSocket) -> None:
+        self.ws = ws
+        self.frame: bytes | None = None
+        self.ready = asyncio.Event()
+
+    def offer(self, frame: bytes) -> None:
+        self.frame = frame
+        self.ready.set()
+
+    async def send_forever(self) -> None:
+        while True:
+            await self.ready.wait()
+            self.ready.clear()
+            if self.frame is not None:
+                await self.ws.send_bytes(self.frame)
 
 
 class StageHub:
@@ -62,7 +120,9 @@ class StageHub:
       ``{"type": "case", "case": {...}}`` (who the patient is: picks the face),
       ``{"type": "emotion", "emotion": ..., "intensity": ...}``,
       ``{"type": "audio", "sample_rate": 16000, "pcm_b64": ...}`` (mono 16-bit PCM),
-      ``{"type": "state", "state": "listening|thinking|idle"}`` and ``{"type": "interrupt"}``.
+      ``{"type": "state", "state": "listening|thinking|idle"}``, ``{"type": "interrupt"}`` and
+      ``{"type": "viewers", "count": n}``. Unreal sends back binary JPEG frames of the patient
+      while ``count`` > 0; they go to every browser on ``/ws/video``.
     * ``/ws/stage``: the teacher page connects here while a conversation runs and sends
       the patient's audio chunks from the ElevenLabs SDK. It is told how many Unreal
       clients listen, so it can mute its own playback while the MetaHuman speaks.
@@ -73,6 +133,8 @@ class StageHub:
         self.stages: set[WebSocket] = set()
         self.emotion = {"type": "emotion", "emotion": "neutral", "intensity": 0.6}
         self.case: dict[str, Any] | None = None  # last case message, replayed when Unreal (re)connects
+        self.viewers: set[VideoViewer] = set()
+        self.frame: bytes | None = None  # newest JPEG of the patient from Unreal
 
     async def to_unreal(self, message: dict[str, Any]) -> None:
         text = json.dumps(message)
@@ -89,6 +151,15 @@ class StageHub:
                 await ws.send_text(text)
             except Exception:
                 self.stages.discard(ws)
+
+    def push_frame(self, frame: bytes) -> None:
+        self.frame = frame
+        for viewer in self.viewers:
+            viewer.offer(frame)
+
+    async def viewers_changed(self) -> None:
+        # Unreal only captures video while somebody watches
+        await self.to_unreal({"type": "viewers", "count": len(self.viewers)})
 
     async def set_case(self, case: dict[str, Any] | None) -> None:
         self.case = {"type": "case", "case": case} if case else None
@@ -200,8 +271,15 @@ def create_app(session: PatientSession | None = None, *, load_case: bool = True)
     @app.middleware("http")
     async def tunnel_guard(request: Request, call_next):
         via_tunnel = any(h in request.headers for h in TUNNEL_HEADERS)
-        if via_tunnel and request.url.path not in PUBLIC_PATHS:
-            return JSONResponse({"error": "not available through the public tunnel"}, status_code=403)
+        path = request.url.path
+        if via_tunnel and path not in PUBLIC_PATHS:
+            # Testers: the teacher page, after entering PUBLIC_ACCESS_CODE. Never the private routes.
+            if path in PRIVATE_PATHS or not access_code():
+                return JSONResponse({"error": "not available through the public tunnel"}, status_code=403)
+            if path != "/access" and not has_access(request.cookies):
+                if request.method == "GET":
+                    return RedirectResponse("/access", status_code=303)
+                return JSONResponse({"error": "enter the access code first"}, status_code=401)
         key = (os.getenv("ENGINE_API_KEY") or "").strip()
         if key and request.url.path.startswith("/v1/"):
             if request.headers.get("authorization", "") != f"Bearer {key}":
@@ -269,10 +347,15 @@ def create_app(session: PatientSession | None = None, *, load_case: bool = True)
         if hub.case:
             await ws.send_text(json.dumps(hub.case))
         await ws.send_text(json.dumps(hub.emotion))
+        await ws.send_text(json.dumps({"type": "viewers", "count": len(hub.viewers)}))
         await hub.status()
         try:
             while True:
-                await ws.receive_text()  # nothing expected from Unreal; keeps the socket open
+                message = await ws.receive()
+                if message["type"] == "websocket.disconnect":
+                    break
+                if message.get("bytes"):  # a JPEG frame of the patient
+                    hub.push_frame(message["bytes"])
         except WebSocketDisconnect:
             pass
         finally:
@@ -284,7 +367,7 @@ def create_app(session: PatientSession | None = None, *, load_case: bool = True)
     async def stage_socket(ws: WebSocket) -> None:
         """The teacher page sends the patient's audio here during a conversation."""
         hub: StageHub = app.state.stage
-        if _via_tunnel(ws):
+        if _via_tunnel(ws) and not has_access(ws.cookies):
             await ws.close(code=1008)
             return
         await ws.accept()
@@ -299,6 +382,8 @@ def create_app(session: PatientSession | None = None, *, load_case: bool = True)
                         "type": "audio",
                         "sample_rate": int(message.get("sample_rate") or 16000),
                         "pcm_b64": message["pcm_b64"],
+                        # false: lips only; the voice plays in the tester's browser, not on the demo computer
+                        "audible": bool(message.get("audible", True)),
                     })
                 elif kind == "emotion":
                     await hub.set_emotion(str(message.get("emotion", "neutral")), float(message.get("intensity", 0.6)))
@@ -310,6 +395,45 @@ def create_app(session: PatientSession | None = None, *, load_case: bool = True)
             pass
         finally:
             hub.stages.discard(ws)
+
+    @app.websocket("/ws/video")
+    async def video_socket(ws: WebSocket) -> None:
+        """Browsers watch the patient here: binary JPEG frames from Unreal, newest first."""
+        hub: StageHub = app.state.stage
+        if _via_tunnel(ws) and not has_access(ws.cookies):
+            await ws.close(code=1008)
+            return
+        await ws.accept()
+        viewer = VideoViewer(ws)
+        hub.viewers.add(viewer)
+        await hub.viewers_changed()
+        if hub.frame:
+            viewer.offer(hub.frame)
+        sender = asyncio.create_task(viewer.send_forever())
+        try:
+            while True:
+                await ws.receive_text()  # nothing expected; notices when the viewer leaves
+        except WebSocketDisconnect:
+            pass
+        finally:
+            sender.cancel()
+            hub.viewers.discard(viewer)
+            await hub.viewers_changed()
+
+    @app.get("/access", response_class=HTMLResponse)
+    def access_form() -> str:
+        return ACCESS_PAGE.format(error="")
+
+    @app.post("/access")
+    async def access_check(request: Request):
+        code = (parse_qs((await request.body()).decode("utf-8", "replace")).get("code") or [""])[0].strip()
+        expected = access_code()
+        if not expected or not hmac.compare_digest(code.encode(), expected.encode()):
+            return HTMLResponse(ACCESS_PAGE.format(error='<p class="err">That code is not right.</p>'), status_code=401)
+        response = RedirectResponse("/", status_code=303)
+        response.set_cookie(ACCESS_COOKIE, access_token(expected), max_age=7 * 24 * 3600,
+                            httponly=True, secure=True, samesite="lax")
+        return response
 
     @app.get("/v1/models")
     def models() -> dict[str, Any]:
@@ -382,6 +506,22 @@ def create_app(session: PatientSession | None = None, *, load_case: bool = True)
             yield "data: [DONE]\n\n"
 
         return StreamingResponse(sse(), media_type="text/event-stream")
+
+    @app.api_route("/{path:path}", methods=["GET", "HEAD", "POST"], include_in_schema=False)
+    async def teacher_page(path: str, request: Request) -> Response:
+        """Everything else is the teacher page (for testers coming through the tunnel)."""
+        transport = getattr(app.state, "teacher_transport", None)  # tests inject a fake
+        async with httpx.AsyncClient(transport=transport, timeout=60) as client:
+            try:
+                upstream = await client.request(
+                    request.method, f"{TEACHER_UI_URL}/{path}", params=request.query_params,
+                    content=await request.body(), headers={"content-type": request.headers.get("content-type", "")},
+                )
+            except httpx.HTTPError:
+                return JSONResponse({"error": "the teacher page is not running"}, status_code=502)
+        keep = {"content-type", "cache-control", "last-modified"}
+        return Response(upstream.content, status_code=upstream.status_code,
+                        headers={k: v for k, v in upstream.headers.items() if k.lower() in keep})
 
     return app
 

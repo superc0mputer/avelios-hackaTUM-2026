@@ -134,6 +134,10 @@
           </div>
           <span class="conversation-state" id="conversation-state" data-state="idle">Not connected</span>
         </div>
+        <figure class="patient-video" id="patient-video-box" hidden>
+          <img id="patient-video" alt="The patient, live from the MetaHuman">
+          <figcaption id="patient-video-note">Waiting for the patient video…</figcaption>
+        </figure>
         <div class="conversation-log" id="conversation-log" aria-live="polite">
           <p class="conversation-empty">Click <b>Start talking</b>, allow the microphone and greet the patient. The patient waits for you to speak first.</p>
         </div>
@@ -143,8 +147,8 @@
           <a class="conversation-link" id="talk-link" target="_blank" rel="noopener">Open in ElevenLabs instead</a>
         </div>
         <label class="metahuman-toggle" id="metahuman-toggle" hidden>
-          <input type="checkbox" id="metahuman-voice"> Speak through the MetaHuman
-          <small>(the patient window on the demo computer; leave off to hear the patient here)</small>
+          <input type="checkbox" id="metahuman-voice"> Play the voice on the demo computer
+          <small>(where the MetaHuman runs; leave off to hear the patient in this browser)</small>
         </label>
         <p class="conversation-note" id="conversation-note"></p>
       </section>

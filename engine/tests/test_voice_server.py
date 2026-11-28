@@ -122,10 +122,14 @@ def test_stage_relays_audio_and_emotion_to_unreal():
     client, _ = make_client()
     with client.websocket_connect("/ws/unreal") as unreal:
         assert json.loads(unreal.receive_text()) == {"type": "emotion", "emotion": "neutral", "intensity": 0.6}
+        assert json.loads(unreal.receive_text()) == {"type": "viewers", "count": 0}
         with client.websocket_connect("/ws/stage") as stage:
             assert json.loads(stage.receive_text()) == {"type": "status", "unreal": 1}
             stage.send_text(json.dumps({"type": "audio", "sample_rate": 16000, "pcm_b64": "AAABAA=="}))
-            assert json.loads(unreal.receive_text()) == {"type": "audio", "sample_rate": 16000, "pcm_b64": "AAABAA=="}
+            assert json.loads(unreal.receive_text()) == {"type": "audio", "sample_rate": 16000, "pcm_b64": "AAABAA==", "audible": True}
+            # A tester elsewhere: the lips move, but the demo computer stays quiet
+            stage.send_text(json.dumps({"type": "audio", "pcm_b64": "AAABAA==", "audible": False}))
+            assert json.loads(unreal.receive_text())["audible"] is False
             stage.send_text(json.dumps({"type": "emotion", "emotion": "furious", "intensity": 3}))
             assert json.loads(unreal.receive_text()) == {"type": "emotion", "emotion": "neutral", "intensity": 1.0}
             stage.send_text(json.dumps({"type": "state", "state": "listening"}))
@@ -158,3 +162,51 @@ def test_websockets_closed_through_tunnel():
     with pytest.raises(WebSocketDisconnect):
         with client.websocket_connect("/ws/unreal", headers={"cf-ray": "x"}) as ws:
             ws.receive_text()
+
+
+def test_video_frames_reach_viewers_and_unreal_knows_who_watches():
+    client, _ = make_client()
+    with client.websocket_connect("/ws/unreal") as unreal:
+        assert json.loads(unreal.receive_text())["type"] == "emotion"
+        assert json.loads(unreal.receive_text()) == {"type": "viewers", "count": 0}
+        with client.websocket_connect("/ws/video") as viewer:
+            assert json.loads(unreal.receive_text()) == {"type": "viewers", "count": 1}
+            unreal.send_bytes(b"\xff\xd8jpeg-1")
+            assert viewer.receive_bytes() == b"\xff\xd8jpeg-1"
+        # Nobody watches any more: Unreal can stop capturing
+        assert json.loads(unreal.receive_text()) == {"type": "viewers", "count": 0}
+
+
+def test_public_access_code(monkeypatch):
+    import httpx
+
+    from voice_server import ACCESS_COOKIE, access_token
+
+    client, _ = make_client()
+    client.app.state.teacher_transport = httpx.MockTransport(lambda req: httpx.Response(200, text="teacher " + req.url.path))
+    tunnel = {"cf-ray": "x"}
+    # Without PUBLIC_ACCESS_CODE the tunnel serves ElevenLabs only
+    monkeypatch.delenv("PUBLIC_ACCESS_CODE", raising=False)
+    assert client.get("/", headers=tunnel, follow_redirects=False).status_code == 403
+
+    monkeypatch.setenv("PUBLIC_ACCESS_CODE", "letmein")
+    first = client.get("/", headers=tunnel, follow_redirects=False)
+    assert first.status_code == 303 and first.headers["location"] == "/access"
+    assert client.post("/access", content="code=wrong", headers=tunnel).status_code == 401
+    ok = client.post("/access", content="code=letmein", headers=tunnel, follow_redirects=False)
+    assert ok.status_code == 303 and "letmein" not in ok.headers["set-cookie"]
+
+    allowed = {**tunnel, "cookie": f"{ACCESS_COOKIE}={access_token('letmein')}"}
+    page = client.get("/app.js", headers=allowed)
+    assert page.status_code == 200 and page.text == "teacher /app.js"
+    # The prompt holds the case's secrets: never public, not even with the code
+    assert client.get("/prompt", headers=allowed).status_code == 403
+    assert client.post("/case", json={"case_id": "case-001"}, headers=allowed).status_code == 403
+
+    from starlette.websockets import WebSocketDisconnect
+
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect("/ws/video", headers=tunnel) as ws:
+            ws.receive_bytes()
+    with client.websocket_connect("/ws/video", headers=allowed) as ws:
+        pass  # accepted with the code

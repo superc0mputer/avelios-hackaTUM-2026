@@ -215,8 +215,9 @@ function stageUrl() {
     : 'ws://' + location.hostname + ':8787/ws/stage';
 }
 
-// Several people can open this page over the tailnet, but only one computer shows the
-// MetaHuman. Only a page that opts in sends its patient voice there and goes quiet itself.
+// Several people can open this page, but only one computer runs the MetaHuman. Every page sends
+// the patient's voice there so the lips move (and everyone sees it in the live video); only the
+// page that ticks this box has the demo computer play it out loud and goes quiet itself.
 // Default: on for the demo computer itself (localhost), off elsewhere; remembered per browser.
 const METAHUMAN_KEY = 'vip-metahuman-voice';
 function initialMetaHumanChoice() {
@@ -234,6 +235,43 @@ $('#metahuman-voice').addEventListener('change', () => {
 
 function useMetaHuman() {
   return unrealListeners > 0 && $('#metahuman-voice').checked;
+}
+
+// ---- Live video of the patient (JPEG frames from Unreal, relayed by the voice server) ----
+let video = null;
+let videoUrlObject = null;
+let videoWanted = false;
+
+function videoUrl() {
+  return location.protocol === 'https:'
+    ? 'wss://' + location.host + '/ws/video'
+    : 'ws://' + location.hostname + ':8787/ws/video';
+}
+
+function openVideo() {
+  videoWanted = true;
+  if (video) return;
+  $('#patient-video-box').hidden = false;
+  try {
+    video = new WebSocket(videoUrl());
+  } catch (error) {
+    video = null;
+    return;
+  }
+  video.binaryType = 'blob';
+  video.onmessage = (event) => {
+    if (!(event.data instanceof Blob)) return;
+    const next = URL.createObjectURL(event.data);
+    $('#patient-video').src = next;
+    if (videoUrlObject) URL.revokeObjectURL(videoUrlObject);
+    videoUrlObject = next;
+    $('#patient-video-note').textContent = '';
+  };
+  video.onclose = () => {
+    video = null;
+    $('#patient-video-note').textContent = 'The patient video is not available right now.';
+    if (videoWanted) setTimeout(openVideo, 3000);
+  };
 }
 
 function applyUnrealRouting() {
@@ -332,6 +370,7 @@ async function startConversation(caseId, button) {
     $('#talk-link').hidden = !result.talk_url;
     $('#conversation-note').textContent = liveAgentId ? '' : 'Set ELEVENLABS_AGENT_ID in engine/.env to talk in the browser.';
     $('#conversation-panel').hidden = false;
+    openVideo();
     $('#conversation-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
   } catch (error) {
     $('#status').textContent = error.message;
@@ -357,9 +396,10 @@ $('#talk-button').addEventListener('click', async () => {
       agentId: liveAgentId,
       // WebSocket mode delivers the patient's raw PCM in onAudio, which we relay to Unreal.
       connectionType: 'websocket',
-      onAudio: (base64Audio) => {
-        if (useMetaHuman()) sendToStage({ type: 'audio', sample_rate: PATIENT_AUDIO_RATE, pcm_b64: base64Audio });
-      },
+      // Always to the MetaHuman (when one is connected) so its lips move; audible only if this page asks
+      onAudio: (base64Audio) => sendToStage({
+        type: 'audio', sample_rate: PATIENT_AUDIO_RATE, pcm_b64: base64Audio, audible: useMetaHuman(),
+      }),
       onConnect: () => setConversationState('listening', 'Listening'),
       onDisconnect: () => {
         conversation = null;
@@ -372,7 +412,7 @@ $('#talk-button').addEventListener('click', async () => {
       onModeChange: ({ mode }) => {
         setConversationState(mode, mode === 'speaking' ? 'Patient is speaking' : 'Listening');
         // The MetaHuman looks attentive while the student talks
-        if (mode === 'listening' && useMetaHuman()) sendToStage({ type: 'state', state: 'listening' });
+        if (mode === 'listening') sendToStage({ type: 'state', state: 'listening' });
       },
       onMessage: (payload) => {
         const role = payload.role || (payload.source === 'ai' ? 'agent' : 'user');
