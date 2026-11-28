@@ -11,7 +11,6 @@
 #include "IImageWrapperModule.h"
 #include "Modules/ModuleManager.h"
 #include "Slate/SceneViewport.h"
-#include "Widgets/SWindow.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogVIPVideo, Log, All);
 
@@ -25,6 +24,28 @@ namespace
 	struct FVIPFramePayload : IFramePayload
 	{
 	};
+
+	bool IsUnfilled(const FColor& Pixel)
+	{
+		return Pixel.R == 255 && Pixel.G == 0 && Pixel.B == 255; // the grabber's clear colour
+	}
+
+	/** Width of the filled (non-magenta) part, measured along the top row. */
+	int32 FilledWidth(const TArray<FColor>& Pixels, FIntPoint Size)
+	{
+		if (Pixels.Num() != Size.X * Size.Y || !IsUnfilled(Pixels.Last()))
+		{
+			return Size.X; // bottom-right is drawn: the whole buffer is filled
+		}
+		for (int32 X = Size.X - 1; X >= 0; --X)
+		{
+			if (!IsUnfilled(Pixels[X]))
+			{
+				return X + 1;
+			}
+		}
+		return 0;
+	}
 }
 
 bool UVIPVideoStream::DoesSupportWorldType(const EWorldType::Type WorldType) const
@@ -54,8 +75,6 @@ void UVIPVideoStream::StartCapture()
 	{
 		return; // no game window yet; try again next tick
 	}
-	const TSharedPtr<SWindow> Window = GameEngine->GameViewportWindow.Pin();
-	CaptureScale = FMath::Max(1, FMath::RoundToInt(Window.IsValid() ? Window->GetDPIScaleFactor() : 1.0f));
 	Grabber = MakeShared<FFrameGrabber>(GameEngine->SceneViewport.ToSharedRef(), FrameSize * CaptureScale);
 	Grabber->StartCapturingFrames();
 	NextFrameAt = 0;
@@ -107,6 +126,22 @@ void UVIPVideoStream::Tick(float DeltaTime)
 	if (Frames.Num() > 0 && !bEncoding->load())
 	{
 		FCapturedFrameData& Newest = Frames.Last();
+		const int32 Filled = FilledWidth(Newest.ColorBuffer, Newest.BufferSize);
+		if (Filled > 0 && Filled < FrameSize.X * 9 / 10 && CaptureScale < 4)
+		{
+			// High-DPI screen: grab larger so the filled part is the frame size
+			CaptureScale = FMath::Clamp(CaptureScale * FMath::RoundToInt(float(FrameSize.X) / Filled), CaptureScale + 1, 4);
+			UE_LOG(LogVIPVideo, Display, TEXT("Picture filled %d of %d pixels; grabbing at scale %d"), Filled, Newest.BufferSize.X, CaptureScale);
+			StopCapture(); // the next tick starts again with the larger buffer
+			return;
+		}
+		if (Filled >= Newest.BufferSize.X && CaptureScale > 1)
+		{
+			// Fully drawn after all: cropping would zoom in, so grab at the plain size again
+			CaptureScale = 1;
+			StopCapture();
+			return;
+		}
 		if (Newest.BufferSize == FrameSize)
 		{
 			EncodeAndSend(MoveTemp(Newest.ColorBuffer), FrameSize);

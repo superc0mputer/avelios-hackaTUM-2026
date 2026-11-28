@@ -41,8 +41,9 @@ private:
 
 	TSharedPtr<FFrameGrabber> Grabber;
 
-	// The grabber fills only 1/Scale of its buffer on high-DPI screens (Retina: 2), so it gets a
-	// buffer Scale times larger and we keep the filled top-left part
+	// On Retina screens the grabber fills only the top-left 1/Scale of its buffer (the rest stays
+	// magenta). Measured from the frames; the grabber then gets a buffer Scale times larger and we
+	// keep the filled part
 	int32 CaptureScale = 1;
 	int32 Viewers = 0;
 	double NextFrameAt = 0;
