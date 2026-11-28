@@ -2,7 +2,7 @@
 #   unreal\build.ps1            build whatever is missing
 #   unreal\build.ps1 -Clean     delete the generated content and rebuild
 #   unreal\build.ps1 -Run       build if needed, then open the patient window
-# Options: $env:UE_ROOT = engine folder, $env:VIP_PRESET = Epic preset name
+# Patients: unreal\VIPPatient\Scripts\patients.json. Option: $env:UE_ROOT = engine folder
 param(
     [switch]$Clean,
     [switch]$Run
@@ -33,10 +33,13 @@ if (-not (Test-Path $editorCmd)) {
     Fail "Unreal Engine 5.8 not found at '$ueRoot' (set `$env:UE_ROOT)."
 }
 
-if (-not $env:VIP_PRESET) { $env:VIP_PRESET = "Walter" }
-$preset = Join-Path $ueRoot "Engine\Plugins\MetaHuman\MetaHumanCharacter\Content\Optional\Presets\$($env:VIP_PRESET).uasset"
-if (-not (Test-Path $preset)) {
-    Fail "preset '$($env:VIP_PRESET)' not found. Install 'MetaHuman Creator Core Data' via Epic Games Launcher > 5.8 > Options."
+$patientList = Join-Path $projectDir "Scripts\patients.json"
+$patients = (Get-Content -Raw $patientList | ConvertFrom-Json).patients | ForEach-Object { $_.preset }
+foreach ($name in $patients) {
+    $preset = Join-Path $ueRoot "Engine\Plugins\MetaHuman\MetaHumanCharacter\Content\Optional\Presets\$name.uasset"
+    if (-not (Test-Path $preset)) {
+        Fail "preset '$name' not found. Install 'MetaHuman Creator Core Data' via Epic Games Launcher > 5.8 > Options."
+    }
 }
 
 if ($project.Contains(" ")) { Fail "move the repository to a path without spaces." }
@@ -54,14 +57,14 @@ if ($Clean) {
 }
 New-Item -ItemType Directory -Force $logs | Out-Null
 
-function Invoke-Stage($name, $relativeOutput) {
+function Invoke-Stage($name, $relativeOutput, $logName = $name) {
     $output = Join-Path $content $relativeOutput
-    $log = Join-Path $logs "$name.log"
+    $log = Join-Path $logs "$logName.log"
     if (Test-Path $output) {
-        Write-Host "== ${name}: already built"
+        Write-Host "== ${logName}: already built"
         return
     }
-    Write-Host "== ${name}: running (several minutes), log: $log"
+    Write-Host "== ${logName}: running (several minutes), log: $log"
     if (Test-Path $log) { Remove-Item -Force $log }
     $script = Join-Path $projectDir "Scripts\$name.py"
     & $editorCmd $project "-ExecutePythonScript=$script" "-abslog=$log" -nosplash -unattended | Out-Null
@@ -76,7 +79,7 @@ function Invoke-Stage($name, $relativeOutput) {
         if (Test-Path $output) { Remove-Item -Force $output }
         Fail "$name failed, see $log"
     }
-    Write-Host "== ${name}: done"
+    Write-Host "== ${logName}: done"
 }
 
 # our C++ module (Source/VIPPatient) needs Visual Studio 2022 with "Game development with C++"
@@ -85,8 +88,16 @@ $compileLog = Join-Path $logs "compile.log"
 & (Join-Path $ueRoot "Engine\Build\BatchFiles\Build.bat") VIPPatientEditor Win64 Development "-project=$project" -waitmutex *> $compileLog
 if ($LASTEXITCODE) { Fail "compile failed, see $compileLog" }
 
-Invoke-Stage "build_character" "Patient\MHC_Patient.uasset"
-Invoke-Stage "assemble" "MetaHumans\MHC_Patient\Face\SKM_MHC_Patient_FaceMesh.uasset"
+foreach ($name in $patients) {
+    $env:VIP_PRESET = $name
+    Invoke-Stage "build_character" "Patient\Characters\MHC_$name.uasset" "build_character_$name"
+    Invoke-Stage "assemble" "MetaHumans\MHC_$name\Face\SKM_MHC_${name}_FaceMesh.uasset" "assemble_$name"
+}
+# the room and patient table list every patient, so rebuild them when patients.json changes
+$room = Join-Path $content "Patient\ConsultationRoom.umap"
+if ((Test-Path $room) -and ((Get-Item $patientList).LastWriteTime -gt (Get-Item $room).LastWriteTime)) {
+    Remove-Item -Force $room
+}
 Invoke-Stage "build_scene" "Patient\ConsultationRoom.umap"
 
 Write-Host "Patient ready."

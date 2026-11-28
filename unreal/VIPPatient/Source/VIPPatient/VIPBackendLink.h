@@ -16,7 +16,12 @@ class IWebSocket;
  * Messages (JSON text):
  *   {"type":"audio","sample_rate":16000,"pcm_b64":"..."}   mono 16-bit little-endian PCM
  *   {"type":"emotion","emotion":"sad","intensity":0.6}     unknown emotions fall back to neutral
- *   {"type":"interrupt"}                                   student talked over the patient (logged)
+ *   {"type":"interrupt"}                                   student talked over the patient: stop speaking
+ *
+ * Optional, proposed for the voice server (#37, #45, #35, #38):
+ *   {"type":"state","state":"thinking"}                    listening | thinking | idle
+ *   {"type":"case","case":{...}}                           the teacher case JSON: patient, mood, personality
+ *   "pain": 0-10, "discomfort": 0-1                        extra fields on an emotion message
  */
 UCLASS()
 class UVIPBackendLink : public UTickableWorldSubsystem

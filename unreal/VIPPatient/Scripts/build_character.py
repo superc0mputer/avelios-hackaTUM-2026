@@ -2,9 +2,10 @@
 import os
 import unreal
 
+# build.sh runs this once per patient in patients.json
 PRESET_NAME = os.environ.get("VIP_PRESET", "Walter")
 PRESET = "/MetaHumanCharacter/Optional/Presets/" + PRESET_NAME
-CHAR = "/Game/Patient/MHC_Patient"
+CHAR = "/Game/Patient/Characters/MHC_" + PRESET_NAME
 
 
 def log(message):
