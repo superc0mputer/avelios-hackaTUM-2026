@@ -1229,6 +1229,8 @@ function wire() {
   $('#captions-toggle').addEventListener('click', (event) => {
     const on = event.currentTarget.getAttribute('aria-pressed') !== 'true';
     event.currentTarget.setAttribute('aria-pressed', String(on));
+    event.currentTarget.title = on ? 'Captions on (click to hide)' : 'Captions off (click to show)';
+    event.currentTarget.setAttribute('aria-label', on ? 'Hide captions' : 'Show captions');
     $('#screen-consult').classList.toggle('no-captions', !on);
   });
   $('#notes-toggle').addEventListener('click', () => Consult.setNotes(!$('#screen-consult').classList.contains('notes-open')));
