@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "VIP Patient Case",
+  "description": "Patient facts for an in-person clinical interview. The student works out the likely diagnosis.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "case_id", "case_pair_id", "character_id", "diagnosis", "patient",
+    "personality", "symptoms", "medical_history", "medications", "allergies",
+    "family_history", "lifestyle", "secrets", "evaluation_fact_ids"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.2" },
+    "case_id": { "type": "string", "pattern": "^case-[0-9]{3,}$" },
+    "case_pair_id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+    "character_id": { "enum": ["man-01", "man-02", "man-03", "woman-01", "woman-02", "woman-03"] },
+    "diagnosis": { "type": "string", "minLength": 1 },
+    "patient": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "age", "gender", "life_story"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "age": { "type": "integer", "minimum": 18, "maximum": 110 },
+        "gender": { "type": "string", "minLength": 1 },
+        "life_story": { "type": "string", "minLength": 1 }
+      }
+    },
+    "personality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "description", "mood"],
+      "properties": {
+        "type": {
+          "enum": ["no_preference", "downplays_everything", "anxious_talkative", "shy_reserved", "assertive", "distrustful", "custom"]
+        },
+        "description": { "type": "string" },
+        "mood": { "enum": ["neutral", "happy", "sad", "fear", "disgust", "anger", "surprise"] }
+      }
+    },
+    "symptoms": { "$ref": "#/$defs/factsRequired" },
+    "medical_history": { "$ref": "#/$defs/facts" },
+    "medications": { "$ref": "#/$defs/facts" },
+    "allergies": { "$ref": "#/$defs/facts" },
+    "family_history": { "$ref": "#/$defs/facts" },
+    "lifestyle": { "$ref": "#/$defs/facts" },
+    "secrets": { "$ref": "#/$defs/facts" },
+    "evaluation_fact_ids": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["symptoms", "medical_history", "medications", "allergies", "family_history", "lifestyle", "secrets"],
+      "properties": {
+        "symptoms": { "$ref": "#/$defs/ids" },
+        "medical_history": { "$ref": "#/$defs/ids" },
+        "medications": { "$ref": "#/$defs/ids" },
+        "allergies": { "$ref": "#/$defs/ids" },
+        "family_history": { "$ref": "#/$defs/ids" },
+        "lifestyle": { "$ref": "#/$defs/ids" },
+        "secrets": { "$ref": "#/$defs/ids" }
+      }
+    }
+  },
+  "$defs": {
+    "facts": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "factsRequired": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+    "ids": { "type": "array", "items": { "type": "string", "pattern": "^[a-z_]+-[0-9]{3,}$" } }
+  }
+}

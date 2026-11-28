@@ -2,6 +2,9 @@
 
 namespace
 {
+	// The recipes were tuned on top of the solver's idle face; at rest that face is faded out (closed
+	// mouth), so the recipes alone need a little more to read at demo distance
+	constexpr float RecipeGain = 1.3f;
 	struct FControl
 	{
 		const TCHAR* Name; // without CTRL_expressions_; "L"/"R" are added unless Sided
@@ -49,6 +52,27 @@ namespace
 	}
 }
 
+void VIPExpressions::AddPain(float Weight, TMap<FString, float>& Out)
+{
+	if (Weight <= 0)
+	{
+		return;
+	}
+	static const FControl Pain[] = {
+		{TEXT("browDown"), 0.6f}, {TEXT("browLateral"), 0.45f},                               // AU4
+		{TEXT("eyeCheekRaise"), 0.45f}, {TEXT("eyeSquintInner"), 0.5f}, {TEXT("eyeLidPress"), 0.4f}, // AU6, AU7
+		{TEXT("noseWrinkle"), 0.45f}, {TEXT("mouthUpperLipRaise"), 0.25f},                    // AU9, AU10
+		{TEXT("eyeBlink"), 0.3f},                                                             // AU43, partly
+		{TEXT("mouthStretch"), 0.15f},                                                        // grimace
+	};
+	for (const FControl& Control : Pain)
+	{
+		const FString Base = FString(TEXT("CTRL_expressions_")) + Control.Name;
+		Out.FindOrAdd(Base + TEXT("L")) += Control.Value * Weight;
+		Out.FindOrAdd(Base + TEXT("R")) += Control.Value * Weight;
+	}
+}
+
 bool VIPExpressions::IsKnown(const FString& Emotion)
 {
 	return Recipes().Contains(Emotion.ToLower());
@@ -76,11 +100,11 @@ void VIPExpressions::Add(const FString& Emotion, float Weight, TMap<FString, flo
 		const FString Base = FString(TEXT("CTRL_expressions_")) + Control.Name;
 		if (Control.bSided)
 		{
-			Out.FindOrAdd(Base) += Control.Value * Weight;
+			Out.FindOrAdd(Base) += Control.Value * Weight * RecipeGain;
 			continue;
 		}
-		Out.FindOrAdd(Base + TEXT("L")) += Control.Value * Weight;
-		Out.FindOrAdd(Base + TEXT("R")) += Control.Value * Weight;
+		Out.FindOrAdd(Base + TEXT("L")) += Control.Value * Weight * RecipeGain;
+		Out.FindOrAdd(Base + TEXT("R")) += Control.Value * Weight * RecipeGain;
 	}
 }
 

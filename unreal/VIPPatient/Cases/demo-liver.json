@@ -1,0 +1,23 @@
+{
+  "_comment": "Demo case for the Unreal look only (#45): patient, mood, personality and the proposed 'presentation' field. Not a full teacher case.",
+  "case_id": "demo-liver",
+  "character_id": "man-02",
+  "diagnosis": "Alcohol-related liver disease (demo)",
+  "patient": {
+    "age": 72,
+    "gender": "male"
+  },
+  "personality": {
+    "type": "distrustful",
+    "mood": "neutral"
+  },
+  "presentation": {
+    "pain": 2,
+    "breathing": "normal",
+    "discomfort": 0.2,
+    "visible_signs": [
+      "jaundice",
+      "red_eyes"
+    ]
+  }
+}
