@@ -71,8 +71,10 @@ for preset in $patients; do
   stage build_character "$content/Patient/Characters/MHC_$preset.uasset" "build_character_$preset"
   stage assemble "$content/MetaHumans/MHC_$preset/Face/SKM_MHC_${preset}_FaceMesh.uasset" "assemble_$preset"
 done
-# the room and patient table list every patient, so rebuild them when patients.json changes
-[ "$project_dir/Scripts/patients.json" -nt "$content/Patient/ConsultationRoom.umap" ] && rm -f "$content/Patient/ConsultationRoom.umap"
+# the room and patient table list every patient, so rebuild them when patients.json or the room scripts change
+for source in patients.json build_scene.py office.py office_pack.py textures; do
+  [ "$project_dir/Scripts/$source" -nt "$content/Patient/ConsultationRoom.umap" ] && rm -f "$content/Patient/ConsultationRoom.umap"
+done
 stage build_scene "$content/Patient/ConsultationRoom.umap"
 
 echo "Patient ready."

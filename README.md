@@ -185,6 +185,18 @@ On Windows: `powershell -ExecutionPolicy Bypass -File unreal\package.ps1` (not t
 - If Unreal fails: the teacher page plays the patient's voice itself whenever no Unreal client is connected to the voice server (#49), so the conversation goes on voice-only.
 - Checked tonight: the packaged app (2.4 GB) loads a case, swaps the patient, plays the body idle and shows signs, breathing, emotions and pain.
 
+### The doctor's office
+
+The patient sits on a chair in a doctor's office, seen from the doctor's chair: head and shoulders (65 mm lens), the examination side of the room behind (curtains, plant, disinfectant, gloves, sharps container, blood-pressure unit, supply cabinet), the desk in front. Built by `Scripts/build_scene.py` and `Scripts/office.py`; the legs are bent in C++ (`VIPBody.h`, Unreal has no seated animation), `-VIPStand` keeps the patient standing.
+
+The furniture looks best with the free Fab pack **Office Pack - Modern Office Interior Props (FREE)** (desk, visitor chair, curtains, fig plant, rug, desk items). Its licence does not allow it in this public repository, so everyone gets it from their own Fab account:
+
+1. On fab.com (or in the Epic Games Launcher, Fab Library) add the free pack to your library.
+2. Download the **GLB** format (it carries the materials and textures; the OBJ download has none). Fab saves it under `~/Downloads/VaultCache/FabLibrary/`; anywhere else, put the file in `unreal/OfficePack/` (ignored by Git) or set `VIP_OFFICE_PACK=<file or folder>`.
+3. Run `unreal/build.sh`: `Scripts/office_pack.py` imports it into `Content/OfficePack` (about 190 MB, not in Git) and the room is rebuilt with it.
+
+Without the pack the build still works and uses the scripted furniture. Decoration images (eye chart, poster, clock, window view) are our own, drawn by `Scripts/make_textures.py`. Test views: `-VIPCamera=x,y,z,pitch,yaw[,focal]` puts the camera anywhere.
+
 ### Patients
 
 The app has six patients, built from Epic presets listed in `unreal/VIPPatient/Scripts/patients.json`. Ages are estimated from how the faces look:

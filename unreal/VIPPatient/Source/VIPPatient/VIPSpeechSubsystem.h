@@ -166,6 +166,7 @@ private:
 
 	TArray<FString> TestMoods;
 	float TestMoodSeconds = 4;
+	double NextOutfitCheck = 0;
 	int32 TestMoodIndex = 0;
 	double NextTestMoodAt = 0;
 

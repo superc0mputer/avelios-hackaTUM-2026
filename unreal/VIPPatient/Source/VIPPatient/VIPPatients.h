@@ -4,6 +4,12 @@
 #include "Engine/DataTable.h"
 #include "VIPPatients.generated.h"
 
+namespace VIPPatients
+{
+	/** Height of the hip joints above the floor when seated, in cm (chair seat about 46 cm, build_scene.py). */
+	inline constexpr float SeatHipHeight = 56.0f;
+}
+
 /** One patient the app can show. Rows come from Scripts/patients.json via build_scene.py. */
 USTRUCT(BlueprintType)
 struct FVIPPatientRow : public FTableRowBase
