@@ -115,6 +115,11 @@ class TeacherHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(STATIC_ROOT), **kwargs)
 
+    def end_headers(self):
+        # Always revalidate: after an update, a cached app.js would show the old page
+        self.send_header("Cache-Control", "no-cache")
+        super().end_headers()
+
     def do_GET(self):
         path = urlparse(self.path).path
         if path == "/api/next-id":
