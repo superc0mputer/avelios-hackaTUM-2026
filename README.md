@@ -175,6 +175,17 @@ The app shows the patient closest to the case: gender first, then age. For now t
 
 To add a patient, add a line to `patients.json` with an Epic preset name (see `Engine/Plugins/MetaHuman/MetaHumanCharacter/Content/Optional/Presets` in the Unreal folder) and run the build again. Each patient adds about 10 minutes of build time and about 0.5 GB to the app.
 
+### The case decides the look (#45)
+
+When a case is loaded (from the voice server, or `-VIPCase=cases/case-001.json`), Unreal shows the patient that fits it:
+
+- **Who:** the case's `character_id` (`man-01` Bruce, `man-02` Walter, `man-03` Trey, `woman-01` Lani, `woman-02` Grace, `woman-03` Sunita, set in `patients.json`) if that patient's age is within 15 years of `patient.age`; otherwise the closest age of the same gender. A 58-year-old never gets a 25-year-old face.
+- **Starting mood:** `personality.mood`.
+- **Personality in body language:** `personality.type`: anxious_talkative blinks and looks around more and moves more, shy_reserved never fully holds eye contact, assertive holds a steady gaze, distrustful glances away with a slightly narrowed look and does not nod.
+- **Optional `presentation`** (proposed addition to the case schema): `{"pain": 0-10, "breathing": "normal|fast_shallow|laboured|slow_deep|<rate>", "discomfort": 0-1, "visible_signs": [...]}`. Pain and discomfort from the case are the floor: turns can raise them, not drop below.
+
+Test without the backend: `python3 unreal/VIPPatient/Scripts/fake_voice_server.py --wav reply.wav --case cases/case-001.json --pain 5 --breathing fast_shallow`, then start the game with `-VIPServer=ws://127.0.0.1:8787/ws/unreal` (use the IP: `localhost` failed to connect on macOS). It sends the case, then three turns with thinking, emotion and streamed audio, and interrupts the second one.
+
 ### How the patient speaks
 
 `Source/VIPPatient` feeds speech audio straight into MetaHuman's audio-to-face solver, so generated voice (ElevenLabs) moves the lips without a microphone or virtual audio cable. The same samples are played as sound, held back about 0.12 s so lips and voice line up.

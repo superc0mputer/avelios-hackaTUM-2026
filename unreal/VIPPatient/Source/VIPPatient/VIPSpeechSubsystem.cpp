@@ -135,22 +135,22 @@ void UVIPSpeechSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	Life = MakeShared<FVIPLife>();
 	StartSource(VoiceSampleRate);
 
-	// Which patient: from the case later (#24); for now from the command line
-	FString Gender;
-	int32 Age = -1;
-	FParse::Value(FCommandLine::Get(), TEXT("VIPGender="), Gender);
-	FParse::Value(FCommandLine::Get(), TEXT("VIPAge="), Age);
-	int32 LooksAge = 72; // Walter, the patient placed in the level
-	VIPPatients::Choose(InWorld, Gender, Age, &LooksAge);
+	// Which patient: a case file (-VIPCase=), or gender and age from the command line. The voice
+	// server can send another case at any time (VIPBackendLink)
+	FVIPCase Case;
+	FString CasePath;
+	if (FParse::Value(FCommandLine::Get(), TEXT("VIPCase="), CasePath) && !FVIPCase::FromFile(CasePath, Case))
+	{
+		UE_LOG(LogVIP, Warning, TEXT("Could not read case %s"), *CasePath);
+	}
+	FParse::Value(FCommandLine::Get(), TEXT("VIPGender="), Case.Gender);
+	FParse::Value(FCommandLine::Get(), TEXT("VIPAge="), Case.Age);
+	FParse::Value(FCommandLine::Get(), TEXT("VIPCharacter="), Case.Character);
+	FParse::Value(FCommandLine::Get(), TEXT("VIPPersonality="), Case.Personality);
+	ApplyCase(Case);
 
-	// Older patients move less and slower
-	LifeMovement = LooksAge >= 70 ? 0.65f : LooksAge >= 55 ? 0.8f : 1.0f;
-	UpdateLife();
-
-	DriveFace();
-
-	FString Emotion = TEXT("neutral");
-	float Intensity = 1.0f;
+	FString Emotion = TargetEmotion; // the case's mood unless -VIPMood= says otherwise
+	float Intensity = TargetIntensity > 0 ? TargetIntensity : 1.0f;
 	FString Moods;
 	FParse::Value(FCommandLine::Get(), TEXT("VIPMood="), Emotion);
 	FParse::Value(FCommandLine::Get(), TEXT("VIPIntensity="), Intensity);
@@ -202,6 +202,11 @@ void UVIPSpeechSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 
 void UVIPSpeechSubsystem::ApplyTestStep(const FString& Step)
 {
+	// "-": change nothing, just take the shot (e.g. while the voice server drives the patient)
+	if (Step == TEXT("-"))
+	{
+		return;
+	}
 	// "listening", "thinking", "idle": attention; "stop": interrupt
 	if (Step == TEXT("listening") || Step == TEXT("thinking") || Step == TEXT("idle"))
 	{
@@ -475,12 +480,38 @@ void UVIPSpeechSubsystem::ApplyBreathing()
 
 void UVIPSpeechSubsystem::SetPain(float InLevel)
 {
-	PainLevel = FMath::Clamp(InLevel, 0.0f, 10.0f);
+	PainLevel = FMath::Clamp(FMath::Max(InLevel, CasePain), 0.0f, 10.0f); // never below the case
 	if (PainLevel < 3)
 	{
 		NextWince = 0;
 	}
 	UE_LOG(LogVIP, Display, TEXT("Pain %.1f"), PainLevel);
+}
+
+void UVIPSpeechSubsystem::ApplyCase(const FVIPCase& Case)
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+	int32 LooksAge = 72; // Walter, the patient placed in the level
+	VIPPatients::Choose(*World, Case.Gender, Case.Age, &LooksAge, Case.Character);
+	DriveFace(); // also restarts the body animation of a newly spawned patient
+
+	// Older patients move less and slower; personality shows in blinking, gaze and movement
+	Style = FVIPPersonalityStyle::For(Case.Personality);
+	LifeMovement = (LooksAge >= 70 ? 0.65f : LooksAge >= 55 ? 0.8f : 1.0f) * Style.Movement;
+
+	CasePain = FMath::Clamp(Case.Pain, 0.0f, 10.0f);
+	CaseDiscomfort = FMath::Max(FMath::Clamp(Case.Discomfort, 0.0f, 1.0f), Style.Discomfort);
+	SetPain(CasePain);
+	SetDiscomfort(CaseDiscomfort);
+	SetBreathing(Case.Breathing.IsEmpty() ? FString(TEXT("normal")) : Case.Breathing);
+	SetEmotion(Case.Mood.IsEmpty() ? FString(TEXT("neutral")) : Case.Mood, 0.6f);
+	UpdateLife();
+	UE_LOG(LogVIP, Display, TEXT("Case: character '%s', %s %d, mood %s, personality '%s', pain %.0f, breathing %s, discomfort %.2f, signs %d"),
+		*Case.Character, *Case.Gender, Case.Age, *Case.Mood, *Case.Personality, CasePain, *Case.Breathing, CaseDiscomfort, Case.VisibleSigns.Num());
 }
 
 void UVIPSpeechSubsystem::SetDiscomfort(float InDiscomfort)
@@ -489,7 +520,7 @@ void UVIPSpeechSubsystem::SetDiscomfort(float InDiscomfort)
 	{
 		AvoidSide = PreferredSide;
 	}
-	Discomfort = FMath::Clamp(InDiscomfort, 0.0f, 1.0f);
+	Discomfort = FMath::Clamp(FMath::Max(InDiscomfort, CaseDiscomfort), 0.0f, 1.0f); // never below the case
 	UE_LOG(LogVIP, Display, TEXT("Discomfort %.2f"), Discomfort);
 }
 
@@ -537,6 +568,11 @@ void UVIPSpeechSubsystem::UpdateLife()
 		P.GlanceRate = 0.15f;
 		P.NodsPerMinute = 6;
 	}
+	// Personality (#45)
+	P.BlinkRate *= Style.BlinkRate;
+	P.GlanceRate = FMath::Clamp(P.GlanceRate + Style.GlanceRate, 0.0f, 1.0f);
+	P.NodsPerMinute *= Style.Nods;
+
 	// Discomfort pulls gaze and head down and aside, blinks more and stops nodding (#38)
 	const float D = DiscomfortShown;
 	if (D > 0.01f)
@@ -612,6 +648,13 @@ void UVIPSpeechSubsystem::UpdateEmotion(float DeltaTime)
 		Offsets.FindOrAdd(TEXT("CTRL_expressions_browRaiseInR")) += 0.25f * DiscomfortShown;
 		Offsets.FindOrAdd(TEXT("CTRL_expressions_mouthCornerDepressL")) += 0.12f * DiscomfortShown;
 		Offsets.FindOrAdd(TEXT("CTRL_expressions_mouthCornerDepressR")) += 0.12f * DiscomfortShown;
+	}
+	if (Style.Squint > 0)
+	{
+		Offsets.FindOrAdd(TEXT("CTRL_expressions_eyeSquintInnerL")) += Style.Squint;
+		Offsets.FindOrAdd(TEXT("CTRL_expressions_eyeSquintInnerR")) += Style.Squint;
+		Offsets.FindOrAdd(TEXT("CTRL_expressions_browDownL")) += Style.Squint * 0.5f;
+		Offsets.FindOrAdd(TEXT("CTRL_expressions_browDownR")) += Style.Squint * 0.5f;
 	}
 	VIPExpressions::AddPain(PainShown + Wince * WinceStrength * FMath::Max(PainLevel, 3.0f) / 10.0f, Offsets);
 

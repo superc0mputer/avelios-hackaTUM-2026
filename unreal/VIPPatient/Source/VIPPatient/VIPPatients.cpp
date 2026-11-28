@@ -12,9 +12,16 @@ namespace
 	const FName FollowHeadTag = TEXT("VIPFollowHead");
 	const FName HeadBone = TEXT("head");
 
-	/** Lower is better. A wrong gender always loses to a wrong age. */
-	int32 Score(const FVIPPatientRow& Row, const FString& Gender, int32 Age)
+	constexpr int32 CharacterAgeTolerance = 15;
+
+	/** Lower is better. A wrong gender always loses to a wrong age; a fitting character wins. */
+	int32 Score(const FVIPPatientRow& Row, const FString& Gender, int32 Age, const FString& Character)
 	{
+		if (!Character.IsEmpty() && Row.Character.Equals(Character, ESearchCase::IgnoreCase)
+			&& (Age < 0 || FMath::Abs(Row.Age - Age) <= CharacterAgeTolerance))
+		{
+			return -1;
+		}
 		int32 Result = 0;
 		if (!Gender.IsEmpty() && !Row.Gender.Equals(Gender, ESearchCase::IgnoreCase))
 		{
@@ -42,7 +49,7 @@ namespace
 	}
 }
 
-AActor* VIPPatients::Choose(UWorld& World, const FString& Gender, int32 Age, int32* OutAge)
+AActor* VIPPatients::Choose(UWorld& World, const FString& Gender, int32 Age, int32* OutAge, const FString& Character)
 {
 	AActor* Placed = nullptr;
 	for (TActorIterator<AActor> It(&World); It; ++It)
@@ -66,7 +73,7 @@ AActor* VIPPatients::Choose(UWorld& World, const FString& Gender, int32 Age, int
 	int32 BestScore = TNumericLimits<int32>::Max();
 	Table->ForeachRow<FVIPPatientRow>(TEXT("VIPPatients"), [&](const FName& Name, const FVIPPatientRow& Row)
 	{
-		const int32 RowScore = Score(Row, Gender, Age);
+		const int32 RowScore = Score(Row, Gender, Age, Character);
 		if (RowScore < BestScore)
 		{
 			Best = &Row;
@@ -97,8 +104,8 @@ AActor* VIPPatients::Choose(UWorld& World, const FString& Gender, int32 Age, int
 		Patient = World.SpawnActor<AActor>(Class, Where, Params);
 		Patient->Tags.Add(PatientTag);
 	}
-	UE_LOG(LogVIPPatients, Display, TEXT("Patient %s (%s, %s, %d) for gender '%s' age %d"),
-		*BestName.ToString(), *Best->Preset, *Best->Gender, Best->Age, *Gender, Age);
+	UE_LOG(LogVIPPatients, Display, TEXT("Patient %s (%s, %s, %d, %s) for gender '%s' age %d character '%s'"),
+		*BestName.ToString(), *Best->Preset, *Best->Gender, Best->Age, *Best->Character, *Gender, Age, *Character);
 	if (OutAge)
 	{
 		*OutAge = Best->Age;

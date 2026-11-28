@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "ILiveLinkSource.h"
 #include "Subsystems/WorldSubsystem.h"
+#include "VIPCase.h"
 #include "VIPSpeechSubsystem.generated.h"
 
 class FVIPExpressionLayer;
@@ -76,6 +77,13 @@ public:
 	 */
 	void SetDiscomfort(float InDiscomfort);
 
+	/**
+	 * Shows the patient a case describes (#45): picks the patient (character, gender, age), sets the
+	 * starting mood, personality body language, pain, breathing and discomfort. Pain and discomfort
+	 * from the case are the floor: later turns can raise them, not drop below. Can be called again.
+	 */
+	void ApplyCase(const FVIPCase& Case);
+
 	/** The student interrupted: stop talking now and look at them (#25, #37). */
 	void StopSpeaking();
 
@@ -138,6 +146,10 @@ private:
 	float Discomfort = 0;       // asked for
 	float DiscomfortShown = 0;  // smoothed
 	float AvoidSide = 1;
+
+	FVIPPersonalityStyle Style;
+	float CasePain = 0;
+	float CaseDiscomfort = 0;
 
 	float PainLevel = 0;  // 0 to 10, what was asked for
 	float PainShown = 0;  // 0 to 1, smoothed

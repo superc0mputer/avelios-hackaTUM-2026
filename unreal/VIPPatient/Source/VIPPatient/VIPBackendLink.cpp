@@ -1,5 +1,6 @@
 #include "VIPBackendLink.h"
 
+#include "VIPCase.h"
 #include "VIPSpeechSubsystem.h"
 
 #include "Dom/JsonObject.h"
@@ -165,10 +166,37 @@ void UVIPBackendLink::HandleMessage(const FString& Message)
 		Json->TryGetNumberField(TEXT("intensity"), Intensity);
 		Speech->SetEmotion(Emotion, static_cast<float>(FMath::Clamp(Intensity, 0.0, 1.0)));
 		UE_LOG(LogVIPLink, Display, TEXT("Emotion %s %.2f"), *Emotion, Intensity);
+
+		// Optional per turn (#35, #38): pain 0-10 and discomfort 0-1; the case's values are the floor
+		double Value = 0;
+		if (Json->TryGetNumberField(TEXT("pain"), Value))
+		{
+			Speech->SetPain(static_cast<float>(Value));
+		}
+		if (Json->TryGetNumberField(TEXT("discomfort"), Value))
+		{
+			Speech->SetDiscomfort(static_cast<float>(Value));
+		}
 	}
 	else if (Type == TEXT("interrupt"))
 	{
-		// TODO: stop queued speech once UVIPSpeechSubsystem has a Stop()
+		Speech->StopSpeaking();
 		UE_LOG(LogVIPLink, Display, TEXT("Student interrupted the patient"));
+	}
+	else if (Type == TEXT("state"))
+	{
+		// {"type":"state","state":"listening|thinking|idle"}: the student talks, or the answer is pending (#37)
+		FString State;
+		Json->TryGetStringField(TEXT("state"), State);
+		Speech->SetAttention(State);
+	}
+	else if (Type == TEXT("case"))
+	{
+		// {"type":"case","case":{...teacher case JSON...}}: patient, mood, personality, presentation (#45)
+		FVIPCase Case;
+		if (FVIPCase::FromJson(Json, Case))
+		{
+			Speech->ApplyCase(Case);
+		}
 	}
 }
