@@ -42,11 +42,15 @@ def slug(value: str) -> str:
     return re.sub(r"-+", "-", re.sub(r"[^a-z0-9]+", "-", normalized.lower())).strip("-")
 
 
+# case-100 to case-199 are the preset demo scenarios; teacher cases are numbered around them.
+PRESET_CASE_NUMBERS = range(100, 200)
+
+
 def next_case_id() -> str:
     numbers = []
     for path in CASES_ROOT.glob("case-*.json"):
         match = re.fullmatch(r"case-(\d+)\.json", path.name)
-        if match:
+        if match and int(match.group(1)) not in PRESET_CASE_NUMBERS:
             numbers.append(int(match.group(1)))
     return f"case-{max(numbers, default=0) + 1:03d}"
 
@@ -81,8 +85,27 @@ def build_case(payload: dict, case_id: str) -> dict:
         },
         **{category: [item.strip() for item in payload.get(category, []) if item.strip()] for category in FACT_CATEGORIES},
     }
+    presentation = build_presentation(payload.get("presentation"))
+    if presentation:
+        case["presentation"] = presentation
     case["evaluation_fact_ids"] = make_evaluation_ids(case)
     return case
+
+
+def build_presentation(raw) -> dict:
+    """How the illness shows in the MetaHuman (optional; the schema checks the values)."""
+    if not isinstance(raw, dict):
+        return {}
+    presentation = {}
+    for key in ("pain", "discomfort"):
+        if isinstance(raw.get(key), (int, float)) and not isinstance(raw.get(key), bool):
+            presentation[key] = raw[key]
+    if raw.get("breathing") not in (None, ""):
+        presentation["breathing"] = raw["breathing"]
+    signs = raw.get("visible_signs")
+    if isinstance(signs, list) and signs:
+        presentation["visible_signs"] = signs
+    return presentation
 
 
 def validate_case(case: dict) -> list[str]:

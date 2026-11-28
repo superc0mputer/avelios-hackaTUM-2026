@@ -1,0 +1,92 @@
+{
+  "schema_version": "1.2",
+  "case_id": "case-103",
+  "case_pair_id": "moderate-depressive-episode",
+  "character_id": "woman-03",
+  "diagnosis": "Moderate depressive episode",
+  "patient": {
+    "name": "Anjali Mehta",
+    "age": 28,
+    "gender": "female",
+    "life_story": "Anjali moved to the city a year ago for a job as a junior accountant. She used to go bouldering three times a week and call her sister every day. She broke up with her partner four months ago and now spends most evenings alone in her flat."
+  },
+  "personality": {
+    "type": "shy_reserved",
+    "mood": "sad",
+    "description": "Anjali speaks quietly, gives short answers and looks down a lot. She came about tiredness and does not mention her mood unless the student asks gently and gives her time. She is embarrassed and afraid of being seen as weak."
+  },
+  "presentation": {
+    "pain": 0,
+    "breathing": "normal",
+    "discomfort": 0.4,
+    "visible_signs": [
+      "tired"
+    ]
+  },
+  "symptoms": [
+    "She has felt tired all the time for about three months and wonders if she needs a blood test.",
+    "She wakes around four in the morning and cannot get back to sleep.",
+    "She has lost interest in bouldering and seeing friends, and finds it hard to concentrate at work; she has made mistakes she would not normally make.",
+    "Her appetite is poor and she has lost about four kilograms without trying. She feels low most of the day, nearly every day.",
+    "No fever, night sweats, heavy periods, changes in bowel habit or feeling unusually hot or cold."
+  ],
+  "medical_history": [
+    "A period of low mood at university; she saw a counsellor a few times.",
+    "Otherwise well."
+  ],
+  "medications": [
+    "Combined contraceptive pill.",
+    "Ibuprofen occasionally for headaches."
+  ],
+  "allergies": [
+    "No known allergies."
+  ],
+  "family_history": [
+    "Her mother has been treated for depression for many years."
+  ],
+  "lifestyle": [
+    "Lives alone in a rented flat; her family lives in another city.",
+    "Does not smoke and does not use drugs.",
+    "Says she drinks 'socially'."
+  ],
+  "secrets": [
+    "Sometimes thinks it would be easier not to wake up in the morning; she has no plan, has never harmed herself and would not because of her sister.",
+    "Drinks two or three glasses of wine most evenings to fall asleep.",
+    "The break-up four months ago hit her harder than she lets anyone see; she cries most evenings.",
+    "Has called in sick twice in the last month and is afraid of losing her job."
+  ],
+  "evaluation_fact_ids": {
+    "symptoms": [
+      "symptoms-001",
+      "symptoms-002",
+      "symptoms-003",
+      "symptoms-004",
+      "symptoms-005"
+    ],
+    "medical_history": [
+      "medical_history-001",
+      "medical_history-002"
+    ],
+    "medications": [
+      "medications-001",
+      "medications-002"
+    ],
+    "allergies": [
+      "allergies-001"
+    ],
+    "family_history": [
+      "family_history-001"
+    ],
+    "lifestyle": [
+      "lifestyle-001",
+      "lifestyle-002",
+      "lifestyle-003"
+    ],
+    "secrets": [
+      "secrets-001",
+      "secrets-002",
+      "secrets-003",
+      "secrets-004"
+    ]
+  }
+}

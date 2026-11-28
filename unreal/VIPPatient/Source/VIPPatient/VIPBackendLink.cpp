@@ -164,7 +164,7 @@ void UVIPBackendLink::HandleMessage(const FString& Message)
 		double Intensity = 1.0;
 		Json->TryGetStringField(TEXT("emotion"), Emotion);
 		Json->TryGetNumberField(TEXT("intensity"), Intensity);
-		Speech->SetEmotion(Emotion, static_cast<float>(FMath::Clamp(Intensity, 0.0, 1.0)));
+		Speech->SetEmotion(Emotion, static_cast<float>(FMath::Clamp(Intensity, 0.0, 2.0)));
 		UE_LOG(LogVIPLink, Display, TEXT("Emotion %s %.2f"), *Emotion, Intensity);
 
 		// Optional per turn (#35, #38): pain 0-10 and discomfort 0-1; the case's values are the floor

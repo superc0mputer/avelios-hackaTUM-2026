@@ -1,0 +1,99 @@
+{
+  "schema_version": "1.2",
+  "case_id": "case-104",
+  "case_pair_id": "alcohol-related-liver-disease-with-jaundice-and-ascites",
+  "character_id": "man-02",
+  "diagnosis": "Alcohol-related liver disease with jaundice and ascites",
+  "patient": {
+    "name": "Klaus Richter",
+    "age": 72,
+    "gender": "male",
+    "life_story": "Klaus is a retired joiner who still has a workshop in his garage. He has been married to Helga for 45 years, and they have two sons. Since he retired seven years ago his days have become long, and he spends a lot of them in the pub with old colleagues."
+  },
+  "personality": {
+    "type": "distrustful",
+    "mood": "neutral",
+    "description": "Klaus is suspicious of doctors and only came because Helga insisted. He asks why a question matters, gets prickly about drinking and gives short answers. He becomes more open when the student explains the purpose of questions and does not judge him."
+  },
+  "presentation": {
+    "pain": 2,
+    "breathing": "normal",
+    "discomfort": 0.2,
+    "visible_signs": [
+      "jaundice",
+      "red_eyes"
+    ]
+  },
+  "symptoms": [
+    "His wife noticed the whites of his eyes turning yellow about two weeks ago.",
+    "His belly has swollen over the past month and his trousers no longer fit; his ankles are puffy in the evening.",
+    "He has a dull ache under the right ribs, about two out of ten, and his skin itches all over.",
+    "His urine is dark and his stools are pale. He feels tired and has little appetite. He has not vomited blood and his stools are not black.",
+    "His wife says he has been a bit muddled in the evenings lately; he thinks that is nonsense."
+  ],
+  "medical_history": [
+    "High blood pressure.",
+    "Gout.",
+    "Was told his liver blood tests were 'a bit high' three years ago and did not go back for the follow-up."
+  ],
+  "medications": [
+    "Amlodipine for blood pressure.",
+    "Allopurinol for gout.",
+    "Paracetamol for his knees (see secrets)."
+  ],
+  "allergies": [
+    "No known allergies."
+  ],
+  "family_history": [
+    "His father 'liked a drink' and died of a stroke at 68."
+  ],
+  "lifestyle": [
+    "Lives with his wife Helga in their own house.",
+    "Says he has 'a few beers' with friends.",
+    "Smoked until his fifties; does not smoke now."
+  ],
+  "secrets": [
+    "Drinks six to eight bottles of beer a day and a few glasses of schnapps in the evening, more since he retired.",
+    "Some mornings has a drink first thing to steady his hands.",
+    "His GP told him three years ago to cut down drinking; he tried for a week.",
+    "Takes up to eight paracetamol tablets a day for his knees.",
+    "Hides bottles in the workshop so Helga does not see how much he drinks."
+  ],
+  "evaluation_fact_ids": {
+    "symptoms": [
+      "symptoms-001",
+      "symptoms-002",
+      "symptoms-003",
+      "symptoms-004",
+      "symptoms-005"
+    ],
+    "medical_history": [
+      "medical_history-001",
+      "medical_history-002",
+      "medical_history-003"
+    ],
+    "medications": [
+      "medications-001",
+      "medications-002",
+      "medications-003"
+    ],
+    "allergies": [
+      "allergies-001"
+    ],
+    "family_history": [
+      "family_history-001"
+    ],
+    "lifestyle": [
+      "lifestyle-001",
+      "lifestyle-002",
+      "lifestyle-003"
+    ],
+    "secrets": [
+      "secrets-001",
+      "secrets-002",
+      "secrets-003",
+      "secrets-004",
+      "secrets-005"
+    ]
+  }
+}

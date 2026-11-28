@@ -16,10 +16,12 @@ Environment (engine/.env):
     PATIENT_CASE_PATH   case JSON (default: data/mock_gerhard_mueller.json)
     ENGINE_API_KEY      optional; if set, /v1/* requires "Authorization: Bearer <key>"
                         (store the same value as the agent's custom-LLM API key secret)
+    DIRECTOR, DIRECTOR_MODEL  per-turn face direction, see director.py
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -34,6 +36,7 @@ from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconn
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 
 from case_adapter import load_patient_config
+from director import EMOTIONS, MAX_INTENSITY, Director
 from llm_client import ChatActorClient, LLMClientError
 from models import PatientConfig
 from prompt_builder import build_system_prompt
@@ -50,16 +53,19 @@ FALLBACK_REPLY = "Sorry... could you say that again?"
 TUNNEL_HEADERS = ("cf-connecting-ip", "cf-ray")
 # Routes reachable through the public tunnel (everything else is local/tailnet only).
 PUBLIC_PATHS = {"/v1/chat/completions", "/v1/models", "/health"}
-# Shared emotion names (README, Unreal's SetEmotion); unknown values become neutral.
-EMOTIONS = {"neutral", "happy", "sad", "fear", "disgust", "anger", "surprise"}
+# What the patient is doing in the conversation (Unreal's SetAttention, #37).
+ATTENTION_STATES = {"listening", "thinking", "idle"}
 
 
 class StageHub:
     """Relays the patient's voice and emotion from the browser to Unreal (the MetaHuman).
 
     * ``/ws/unreal``: Unreal connects here and receives JSON messages
-      ``{"type": "emotion", "emotion": ..., "intensity": ...}`` and
-      ``{"type": "audio", "sample_rate": 16000, "pcm_b64": ...}`` (mono 16-bit PCM).
+      ``{"type": "case", "case": {...}}`` (who the patient is and how they look, see ``case_look``),
+      ``{"type": "emotion", "emotion": ..., "intensity": 0-2, "pain": 0-10, "discomfort": 0-1}``
+      (pain and discomfort optional), ``{"type": "audio", "sample_rate": 16000, "pcm_b64": ...}``
+      (mono 16-bit PCM), ``{"type": "state", "state": "listening|thinking|idle"}`` and
+      ``{"type": "interrupt"}``.
     * ``/ws/stage``: the teacher page connects here while a conversation runs and sends
       the patient's audio chunks from the ElevenLabs SDK. It is told how many Unreal
       clients listen, so it can mute its own playback while the MetaHuman speaks.
@@ -68,7 +74,8 @@ class StageHub:
     def __init__(self) -> None:
         self.unreal: set[WebSocket] = set()
         self.stages: set[WebSocket] = set()
-        self.emotion = {"type": "emotion", "emotion": "neutral", "intensity": 0.6}
+        self.emotion: dict[str, Any] = {"type": "emotion", "emotion": "neutral", "intensity": 0.6}
+        self.case: dict[str, Any] | None = None  # last case message, replayed when Unreal (re)connects
 
     async def to_unreal(self, message: dict[str, Any]) -> None:
         text = json.dumps(message)
@@ -86,32 +93,77 @@ class StageHub:
             except Exception:
                 self.stages.discard(ws)
 
-    async def set_emotion(self, emotion: str, intensity: float = 0.6) -> None:
+    async def set_case(self, look: dict[str, Any] | None) -> None:
+        self.case = {"type": "case", "case": look} if look else None
+        if self.case:
+            await self.to_unreal(self.case)
+
+    async def set_state(self, state: str) -> None:
+        if state in ATTENTION_STATES:
+            await self.to_unreal({"type": "state", "state": state})
+
+    async def set_emotion(
+        self, emotion: str, intensity: float = 0.6, *, pain: float | None = None, discomfort: float | None = None,
+    ) -> None:
         emotion = emotion if emotion in EMOTIONS else "neutral"
-        self.emotion = {"type": "emotion", "emotion": emotion, "intensity": max(0.0, min(1.0, intensity))}
-        await self.to_unreal(self.emotion)
+        message: dict[str, Any] = {
+            "type": "emotion", "emotion": emotion, "intensity": max(0.0, min(MAX_INTENSITY, intensity)),
+        }
+        if pain is not None:
+            message["pain"] = max(0.0, min(10.0, pain))
+        if discomfort is not None:
+            message["discomfort"] = max(0.0, min(1.0, discomfort))
+        self.emotion = message
+        await self.to_unreal(message)
 
 
 class PatientSession:
     """The loaded case, its system prompt and the OpenAI client."""
 
-    def __init__(self, client_factory: Callable[[str], ChatActorClient] | None = None) -> None:
+    def __init__(
+        self, client_factory: Callable[[str], ChatActorClient] | None = None, director: Director | None = None,
+    ) -> None:
         self._client_factory = client_factory or (lambda prompt: ChatActorClient(prompt))
         self.case_path: Path | None = None
         self.config: PatientConfig | None = None
         self.client: ChatActorClient | None = None
         self.mood = "neutral"
+        self.case_data: dict[str, Any] | None = None  # the full case, server side only (the director reads it)
+        self.look: dict[str, Any] | None = None  # what Unreal needs to show this patient
+        self.director = director if director is not None else (Director() if Director.enabled() else None)
 
     def load(self, source: Path | dict[str, Any]) -> None:
         """Load a case (engine format or teacher-UI format) from a path or a dict."""
         data = source if isinstance(source, dict) else json.loads(Path(source).read_text(encoding="utf-8"))
         config = load_patient_config(data)
         self.mood = str((data.get("personality") or {}).get("mood") or "neutral")
+        self.case_data = data
+        self.look = case_look(data)
         prompt = build_system_prompt(config)
         self.client = self._client_factory(prompt)
         self.config = config
         self.case_path = source if isinstance(source, Path) else None
         log.info("loaded case %s (%s) with model %s", config.case_id, config.demographics.full_name, self.client.model)
+
+
+def case_look(data: dict[str, Any]) -> dict[str, Any] | None:
+    """The part of a teacher case that Unreal uses to show the patient (VIPCase.cpp).
+
+    Only appearance and behaviour: the diagnosis, the facts and the secrets stay here.
+    Engine-format cases have no look, so Unreal keeps its default patient.
+    """
+    if "schema_version" not in data:
+        return None
+    patient = data.get("patient") or {}
+    look: dict[str, Any] = {
+        "case_id": data.get("case_id"),
+        "character_id": data.get("character_id"),
+        "patient": {k: patient[k] for k in ("name", "age", "gender") if k in patient},
+        "personality": {k: v for k, v in (data.get("personality") or {}).items() if k in ("type", "mood")},
+    }
+    if isinstance(data.get("presentation"), dict):
+        look["presentation"] = data["presentation"]
+    return look
 
 
 def list_cases() -> list[dict[str, Any]]:
@@ -155,10 +207,28 @@ def _case_path_from_env() -> Path:
     return Path(raw) if raw else DEFAULT_CASE_PATH
 
 
+async def direct_face(session: PatientSession, hub: StageHub, history: list[dict[str, Any]]) -> None:
+    """Ask the director how the face reacts to this turn and send it to Unreal."""
+    if session.director is None:
+        return
+    t0 = time.perf_counter()
+    direction = await asyncio.to_thread(session.director.direct, session.case_data, history)
+    if direction is None:
+        return
+    await hub.set_emotion(
+        direction["emotion"], direction["intensity"], pain=direction["pain"], discomfort=direction["discomfort"],
+    )
+    log.info(
+        "face: %s %.2f pain=%.1f discomfort=%.2f (%.0fms)", direction["emotion"], direction["intensity"],
+        direction["pain"], direction["discomfort"], (time.perf_counter() - t0) * 1000,
+    )
+
+
 def create_app(session: PatientSession | None = None, *, load_case: bool = True) -> FastAPI:
     app = FastAPI(title="VIP voice server")
     app.state.session = session or PatientSession()
     app.state.stage = StageHub()
+    app.state.director_tasks = set()  # keeps running director calls referenced
     if load_case:
         app.state.session.load(_case_path_from_env())
 
@@ -210,7 +280,8 @@ def create_app(session: PatientSession | None = None, *, load_case: bool = True)
         except Exception as exc:  # validation errors, bad JSON, LLM client setup
             raise HTTPException(422, f"could not load case: {exc}") from exc
         demo = s.config.demographics
-        # The MetaHuman starts with the case's mood (per-reply emotion comes later).
+        # The MetaHuman switches to this patient's face and look, then starts with the case's mood
+        await app.state.stage.set_case(s.look)
         await app.state.stage.set_emotion(s.mood)
         return {
             "case_id": s.config.case_id, "name": demo.full_name, "age": demo.age, "mood": s.mood,
@@ -230,6 +301,8 @@ def create_app(session: PatientSession | None = None, *, load_case: bool = True)
         await ws.accept()
         hub.unreal.add(ws)
         log.info("unreal connected (%d)", len(hub.unreal))
+        if hub.case:
+            await ws.send_text(json.dumps(hub.case))
         await ws.send_text(json.dumps(hub.emotion))
         await hub.status()
         try:
@@ -266,6 +339,8 @@ def create_app(session: PatientSession | None = None, *, load_case: bool = True)
                     await hub.set_emotion(str(message.get("emotion", "neutral")), float(message.get("intensity", 0.6)))
                 elif kind == "interrupt":
                     await hub.to_unreal({"type": "interrupt"})
+                elif kind == "state":
+                    await hub.set_state(str(message.get("state", "")))
         except (WebSocketDisconnect, ValueError, json.JSONDecodeError):
             pass
         finally:
@@ -289,6 +364,13 @@ def create_app(session: PatientSession | None = None, *, load_case: bool = True)
             raise HTTPException(503, "no case loaded")
         body = await request.json()
         history = [m for m in body.get("messages", []) if isinstance(m, dict)]
+        # The student has finished a turn: the patient thinks until the voice arrives,
+        # and the director decides the face for the answer (next to the reply, never delaying it)
+        await app.state.stage.set_state("thinking")
+        if s.director is not None:
+            task = asyncio.create_task(direct_face(s, app.state.stage, history))
+            app.state.director_tasks.add(task)
+            task.add_done_callback(app.state.director_tasks.discard)
         stream = bool(body.get("stream"))
         completion_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
         created = int(time.time())

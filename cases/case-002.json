@@ -48,6 +48,11 @@
     "Fears the symptoms could be a serious heart problem and worries about being unable to work or garden.",
     "Has stopped gardening alone because he worries he could have an episode without anyone nearby."
   ],
+  "presentation": {
+    "pain": 0,
+    "breathing": "normal",
+    "discomfort": 0.2
+  },
   "evaluation_fact_ids": {
     "symptoms": [
       "symptoms-001",

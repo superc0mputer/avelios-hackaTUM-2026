@@ -122,9 +122,12 @@ teacher page (ElevenLabs SDK) --audio--> voice server /ws/stage --audio + emotio
 - Start the voice server on an address Unreal can reach (`--host 0.0.0.0`; `/ws/*` is refused through the public tunnel).
 - Start Unreal with `VIP_SERVER=ws://<voice-server-ip>:8787/ws/unreal unreal/build.sh --run`, or pass `-VIPServer=ws://...` to the editor or the packaged app. Use an IPv4 address (e.g. `127.0.0.1` or the host's Tailscale IP), not `localhost` or a hostname: the voice server listens on IPv4 only, and macOS may try IPv6 first.
 - Messages to Unreal, as JSON text:
+  - `{"type":"case","case":{...}}` when a case is loaded, and again when Unreal connects later: only what the MetaHuman needs (`character_id`, name, age, gender, personality type and mood, `presentation`), never the diagnosis, facts or secrets → `ApplyCase` (patient, starting mood, body language, signs, breathing, pain);
   - `{"type":"audio","sample_rate":16000,"pcm_b64":...}`: the patient's voice as mono 16-bit PCM → `UVIPSpeechSubsystem::Speak`;
-  - `{"type":"emotion","emotion":"sad","intensity":0.6}` → `SetEmotion` (the case's starting mood for now);
-  - `{"type":"interrupt"}`: the student talked over the patient (logged only for now).
+  - `{"type":"emotion","emotion":"sad","intensity":0.6,"pain":3,"discomfort":0.4}` → `SetEmotion` (0 to 2), `SetPain`, `SetDiscomfort`: the case's mood at the start, then the director's face on every turn (pain and discomfort optional; the case's values are the floor);
+  - `{"type":"state","state":"thinking"}` when the student's turn reaches the engine, `listening` when the student talks (from the page), `idle` when the conversation ends → `SetAttention`;
+  - `{"type":"interrupt"}`: the student talked over the patient (from the ElevenLabs SDK) → `StopSpeaking`.
+- **Director** (`engine/director.py`): on every student turn a short JSON call runs next to the reply and decides the face: one of the 12 emotions, intensity, pain and discomfort, from the case and the last turns. It never delays the reply. In a test with `gpt-6-luna` it took 1.3 to 1.7 s, about as long as the reply's first words, so the face changes before the voice arrives. `DIRECTOR=off` keeps the case's mood; `DIRECTOR_MODEL` picks another model.
 - While an Unreal client is connected, the teacher page mutes its own playback, so the patient speaks only through the MetaHuman.
 
 ## Run the Unreal patient
@@ -222,9 +225,9 @@ When a case is loaded (from the voice server, or `-VIPCase=cases/case-001.json`)
 - **Starting mood:** `personality.mood`.
 - **Personality in body language:** `personality.type`: anxious_talkative blinks and looks around more and moves more, shy_reserved never fully holds eye contact, assertive holds a steady gaze, distrustful glances away with a slightly narrowed look and does not nod.
 - **Visible signs** (#34, `presentation.visible_signs`): `pale`, `jaundice` (yellow skin and sclera), `cyanosis` (dusky bluish-grey skin; the skin material has no separate lip colour), `flushed`, `sweaty` (glossier skin), `red_eyes`, `tired`. `VIPSigns.cpp` changes the MetaHuman's own skin and eye material parameters at runtime, so no rebuild is needed. `-VIPSigns=pale,sweaty`; shot step `signs=pale+sweaty`. `-VIPDumpControls` also lists every material parameter.
-- **Optional `presentation`** (proposed addition to the case schema): `{"pain": 0-10, "breathing": "normal|fast_shallow|laboured|slow_deep|<rate>", "discomfort": 0-1, "visible_signs": [...]}`. Pain and discomfort from the case are the floor: turns can raise them, not drop below.
+- **Optional `presentation`** in the case schema, filled in the teacher form's **Condition** step: `{"pain": 0-10, "breathing": "normal|fast_shallow|laboured|slow_deep|<rate>", "discomfort": 0-1, "visible_signs": [...]}`. Pain and discomfort from the case are the floor: turns can raise them, not drop below. The patient's words match: pain goes into the prompt, and a short-of-breath patient speaks in short phrases (`case_adapter.py`).
 
-Demo cases for the look: `unreal/VIPPatient/Cases/demo-*.json` (chest pain, COPD, depression, liver disease), e.g. `-VIPCase=unreal/VIPPatient/Cases/demo-copd.json`.
+Preset scenarios, full cases the patient engine can run, with a look: `cases/case-101.json` acute coronary syndrome, `case-102` COPD flare-up, `case-103` depression, `case-104` alcohol-related liver disease (case-100 to case-199 are kept for presets; the teacher form numbers its cases around them). Their clinical content is written by us and has not been checked by a doctor. The look-only versions for Unreal tests are `unreal/VIPPatient/Cases/demo-*.json`, e.g. `-VIPCase=unreal/VIPPatient/Cases/demo-copd.json`.
 
 Test without the backend: `python3 unreal/VIPPatient/Scripts/fake_voice_server.py --wav reply.wav --case cases/case-001.json --pain 5 --breathing fast_shallow`, then start the game with `-VIPServer=ws://127.0.0.1:8787/ws/unreal` (use the IP: `localhost` failed to connect on macOS). It sends the case, then three turns with thinking, emotion and streamed audio, and interrupts the second one.
 
@@ -257,13 +260,13 @@ The packaged app takes the same options. On macOS it is sandboxed, so put the fi
 
 `-VIPShots=neutral,sad,sad@2,anger` takes a screenshot of each step (emotion, optionally `@intensity`) into `Saved/VIPShots/` and quits, so looks can be compared without anyone watching. `-VIPDumpControls` logs the face control values the layer writes. `-VIPWide=250` pulls the camera back to see the whole patient.
 
-The patient repeats the file every few seconds and logs jaw, blink, head and mood values to `Saved/Logs`. Turns from the patient engine are not connected yet (#24).
+The patient repeats the file every few seconds and logs jaw, blink, head and mood values to `Saved/Logs`. Live turns come from the voice server (see Connect the MetaHuman).
 
 **Rules for this public repository**
 - Never commit anything from `Content/MetaHumans/`, `Content/Patient/` or `Saved/` (already ignored).
 - Changes made by hand to those generated assets are lost on `--clean`. Put them into the scripts in `unreal/VIPPatient/Scripts/`.
 
-**Current state:** the patient sits in a simple consultation room, speaks a WAV file with lip sync, blinks and moves the head slightly, in the game window and in a packaged Mac app. Tested on one Mac only; lip sync with a macOS test voice judged good by ear (ElevenLabs not tried yet). Not connected to the patient engine yet.
+**Current state:** the patient sits in a doctor's office and is driven by the voice server: the teacher's case picks the patient and look, the voice moves the lips, the director sets the face per turn, and listening, thinking and interruptions show. Lip sync with a macOS test voice judged good by ear. The full chain with ElevenLabs voice into the MetaHuman has not been tested yet; the director was tested against the voice server with a stand-in for Unreal.
 
 ## Technical notes (from the docs, not yet tested by us)
 
