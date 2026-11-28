@@ -116,6 +116,23 @@ teacher page (ElevenLabs SDK) --audio--> voice server /ws/stage --audio + emotio
   - `{"type":"interrupt"}`: the student talked over the patient (logged only for now).
 - While an Unreal client is connected, the teacher page mutes its own playback, so the patient speaks only through the MetaHuman.
 
+## Run the voice patient without ElevenLabs (OpenAI voice)
+
+A second route next to ElevenLabs that needs only the OpenAI key (no ElevenLabs credits, no public tunnel). In the teacher UI's live interview panel choose **Voice: OpenAI** (the default when no `ELEVENLABS_AGENT_ID` is set) and click **Start talking**.
+
+```bash
+cd engine && .venv/bin/uvicorn voice_server:app --host 127.0.0.1 --port 8787
+cd teacher-ui && python server.py          # open http://127.0.0.1:8765
+VIP_SERVER=ws://127.0.0.1:8787/ws/unreal unreal/build.sh --run   # optional: the MetaHuman speaks
+```
+
+- The page finds each utterance itself (microphone level, about 0.9 s of silence ends it) and sends it over `/ws/talk` (local only).
+- `engine/openai_voice.py` transcribes it (`OPENAI_STT_MODEL`, default `gpt-4o-mini-transcribe`), lets the patient engine answer with the same system prompt as the ElevenLabs route, and speaks the answer sentence by sentence with `OPENAI_TTS_MODEL` (default `gpt-4o-mini-tts`). Its `instructions` describe the patient from the case: age, gender, mood, communication style, pain. Voice: `ash` for men, `coral` for women, or `OPENAI_TTS_VOICE`.
+- The audio (mono 16-bit PCM, 24 kHz) goes to Unreal over `/ws/unreal` with `state` messages (listening, thinking, idle), or is played in the page when no MetaHuman is connected.
+- Half duplex: while the patient thinks or speaks, the microphone is ignored, so the patient's voice from the speakers never counts as the student. The student cannot interrupt by talking; use a headset for the demo anyway.
+- Costs go to the OpenAI key (speech-to-text, the patient model, text-to-speech per turn).
+- Loading a teacher case (`POST /case`, both routes) now also sends the case to Unreal (`{"type":"case"}`), so the MetaHuman shows the case's patient, mood and presentation (#45).
+
 ## Run the Unreal patient
 
 The repository holds only our project file, config, C++ module and build scripts. The MetaHuman is **rebuilt on your machine** from an Epic preset, so no Epic assets are published.

@@ -280,7 +280,11 @@ $('#start-button').addEventListener('click', async () => {
     $('#conversation-patient').textContent = 'Live now: ' + result.name + ', ' + result.age;
     $('#talk-link').href = result.talk_url || '#';
     $('#talk-link').hidden = !result.talk_url;
-    $('#conversation-note').textContent = liveAgentId ? '' : 'Set ELEVENLABS_AGENT_ID in engine/.env to talk in the browser.';
+    // ElevenLabs needs an agent; the OpenAI route only needs the voice server.
+    const route = $('#voice-route');
+    route.querySelector('option[value="elevenlabs"]').disabled = !liveAgentId;
+    if (!liveAgentId) route.value = 'openai';
+    $('#conversation-note').textContent = '';
     $('#conversation-panel').hidden = false;
     $('#conversation-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
   } catch (error) {
@@ -292,6 +296,10 @@ $('#start-button').addEventListener('click', async () => {
 });
 
 $('#talk-button').addEventListener('click', async () => {
+  if ($('#voice-route').value === 'openai') {
+    startOpenAITalk();
+    return;
+  }
   if (!liveAgentId || conversation) return;
   if (!window.isSecureContext) {
     $('#conversation-note').textContent = 'The microphone only works over HTTPS (or localhost). Open this page through its https:// address.';
@@ -341,8 +349,207 @@ $('#talk-button').addEventListener('click', async () => {
 });
 
 $('#end-button').addEventListener('click', async () => {
+  if (openaiTalk) stopOpenAITalk();
   if (conversation) await conversation.endSession();
 });
+
+// ---- OpenAI voice route (no ElevenLabs): the page finds each utterance itself ----
+// The voice server transcribes it, lets the patient answer and speaks the answer with
+// OpenAI text-to-speech; the audio goes to Unreal, or comes back here without Unreal.
+const MIC_RATE = 16000;            // what we record and send
+const FRAME = 1024;                // samples per analysis frame (64 ms)
+const SPEECH_FRAMES = 3;           // loud frames in a row that start an utterance
+const SILENCE_MS = 900;            // quiet time that ends it
+const PREROLL_FRAMES = 6;          // audio kept from just before speech started
+const MIN_SPEECH_MS = 350;         // shorter sounds (coughs, clicks) are dropped
+const MAX_UTTERANCE_MS = 30000;
+let openaiTalk = null;
+
+function talkUrl() {
+  return location.protocol === 'https:'
+    ? 'wss://' + location.host + '/ws/talk'
+    : 'ws://' + location.hostname + ':8787/ws/talk';
+}
+
+function toBase64(int16) {
+  const bytes = new Uint8Array(int16.buffer, int16.byteOffset, int16.byteLength);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
+}
+
+function floatToInt16(chunks) {
+  const total = chunks.reduce((n, c) => n + c.length, 0);
+  const out = new Int16Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    for (let i = 0; i < chunk.length; i++) out[offset + i] = Math.max(-1, Math.min(1, chunk[i])) * 0x7fff;
+    offset += chunk.length;
+  }
+  return out;
+}
+
+function playPcm(talk, base64, rate) {
+  const binary = atob(base64);
+  const samples = new Int16Array(binary.length / 2);
+  for (let i = 0; i < samples.length; i++) {
+    samples[i] = binary.charCodeAt(2 * i) | (binary.charCodeAt(2 * i + 1) << 8);
+  }
+  const buffer = talk.player.createBuffer(1, samples.length, rate);
+  const channel = buffer.getChannelData(0);
+  for (let i = 0; i < samples.length; i++) channel[i] = samples[i] / 0x8000;
+  const source = talk.player.createBufferSource();
+  source.buffer = buffer;
+  source.connect(talk.player.destination);
+  const start = Math.max(talk.player.currentTime + 0.05, talk.playUntil);
+  source.start(start);
+  talk.playUntil = start + buffer.duration;
+  talk.sources.push(source);
+  source.onended = () => { talk.sources = talk.sources.filter((s) => s !== source); };
+}
+
+function stopPlayback(talk) {
+  talk.sources.forEach((s) => { try { s.stop(); } catch (e) { /* already stopped */ } });
+  talk.sources = [];
+  talk.playUntil = 0;
+}
+
+async function startOpenAITalk() {
+  if (openaiTalk) return;
+  if (!window.isSecureContext) {
+    $('#conversation-note').textContent = 'The microphone only works over HTTPS (or localhost). Open this page through its https:// address.';
+    return;
+  }
+  $('#talk-button').disabled = true;
+  $('#conversation-note').textContent = '';
+  setConversationState('connecting', 'Connecting…');
+  const talk = {
+    ws: null, stream: null, mic: null, player: null, sources: [], playUntil: 0,
+    busy: false, turn: 0, speaking: false, loud: 0, quietMs: 0, voiceMs: 0,
+    chunks: [], preroll: [], noise: 0.01,
+  };
+  openaiTalk = talk;
+  try {
+    talk.stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
+    });
+    talk.player = new AudioContext();
+    talk.mic = new AudioContext({ sampleRate: MIC_RATE });
+    await new Promise((resolve, reject) => {
+      talk.ws = new WebSocket(talkUrl());
+      talk.ws.onopen = resolve;
+      talk.ws.onerror = () => reject(new Error('The voice server is not reachable.'));
+    });
+  } catch (error) {
+    stopOpenAITalk();
+    $('#conversation-note').textContent = error && error.name === 'NotAllowedError'
+      ? 'Microphone access was blocked. Allow it in the browser and try again.'
+      : 'Could not start the conversation: ' + (error && error.message ? error.message : error);
+    $('#talk-button').disabled = false;
+    return;
+  }
+
+  talk.ws.onmessage = (event) => {
+    const message = JSON.parse(event.data);
+    if (message.type === 'ready') {
+      $('#conversation-note').textContent = message.unreal > 0 ? 'The patient speaks through the MetaHuman.' : '';
+    } else if (message.type === 'state') {
+      if (message.state === 'thinking') talk.turn += 1;
+      talk.busy = message.state === 'thinking' || message.state === 'speaking';
+      const labels = { thinking: 'Patient is thinking', speaking: 'Patient is speaking', listening: 'Listening' };
+      setConversationState(message.state, labels[message.state] || message.state);
+    } else if (message.type === 'student') {
+      addBubble('user', message.text);
+    } else if (message.type === 'patient') {
+      addBubble('agent', message.text, 'openai-' + talk.turn);
+    } else if (message.type === 'audio') {
+      playPcm(talk, message.pcm_b64, message.sample_rate);
+    } else if (message.type === 'interrupted') {
+      stopPlayback(talk);
+    } else if (message.type === 'error') {
+      $('#conversation-note').textContent = message.message;
+    }
+  };
+  talk.ws.onclose = () => { if (openaiTalk === talk) stopOpenAITalk(); };
+
+  // Simple voice activity detection on the microphone level. While the patient is
+  // thinking or speaking the microphone is ignored (half duplex), so the patient's
+  // own voice from the speakers never counts as the student talking.
+  const source = talk.mic.createMediaStreamSource(talk.stream);
+  const processor = talk.mic.createScriptProcessor(FRAME, 1, 1);
+  const frameMs = (FRAME / MIC_RATE) * 1000;
+  processor.onaudioprocess = (event) => {
+    const frame = new Float32Array(event.inputBuffer.getChannelData(0));
+    let sum = 0;
+    for (let i = 0; i < frame.length; i++) sum += frame[i] * frame[i];
+    const rms = Math.sqrt(sum / frame.length);
+    const threshold = Math.max(0.012, talk.noise * 3);
+    if (talk.busy && !talk.speaking) {
+      talk.loud = 0;
+      talk.preroll = [];
+      return;
+    }
+    if (!talk.speaking) {
+      talk.noise = talk.noise * 0.95 + Math.min(rms, 0.05) * 0.05;  // follows the room's noise floor
+      talk.preroll.push(frame);
+      if (talk.preroll.length > PREROLL_FRAMES) talk.preroll.shift();
+      talk.loud = rms > threshold ? talk.loud + 1 : 0;
+      if (talk.loud >= SPEECH_FRAMES) {
+        talk.speaking = true;
+        talk.chunks = talk.preroll.slice();
+        talk.preroll = [];
+        talk.quietMs = 0;
+        talk.voiceMs = SPEECH_FRAMES * frameMs;
+        setConversationState('listening', 'You are speaking');
+        talk.ws.send(JSON.stringify({ type: 'speech_start' }));
+      }
+      return;
+    }
+    talk.chunks.push(frame);
+    if (rms > threshold) {
+      talk.quietMs = 0;
+      talk.voiceMs += frameMs;
+    } else {
+      talk.quietMs += frameMs;
+    }
+    const lengthMs = talk.chunks.length * frameMs;
+    if (talk.quietMs >= SILENCE_MS || lengthMs >= MAX_UTTERANCE_MS) {
+      talk.speaking = false;
+      talk.loud = 0;
+      const chunks = talk.chunks;
+      talk.chunks = [];
+      if (talk.voiceMs < MIN_SPEECH_MS) {
+        setConversationState('listening', 'Listening');
+        return;
+      }
+      talk.busy = true;
+      talk.ws.send(JSON.stringify({ type: 'utterance', sample_rate: MIC_RATE, pcm_b64: toBase64(floatToInt16(chunks)) }));
+    }
+  };
+  source.connect(processor);
+  processor.connect(talk.mic.destination);
+  talk.processor = processor;
+
+  $('#talk-button').hidden = true;
+  $('#talk-button').disabled = false;
+  $('#end-button').hidden = false;
+  $('#voice-route').disabled = true;
+}
+
+function stopOpenAITalk() {
+  const talk = openaiTalk;
+  openaiTalk = null;
+  if (!talk) return;
+  try { if (talk.ws && talk.ws.readyState <= WebSocket.OPEN) talk.ws.close(); } catch (e) { /* closed */ }
+  if (talk.processor) talk.processor.disconnect();
+  if (talk.stream) talk.stream.getTracks().forEach((t) => t.stop());
+  if (talk.mic) talk.mic.close();
+  if (talk.player) { stopPlayback(talk); talk.player.close(); }
+  setConversationState('idle', 'Not connected');
+  $('#talk-button').hidden = false;
+  $('#end-button').hidden = true;
+  $('#voice-route').disabled = false;
+}
 
 $('#mood').value = 'neutral';
 $('#mapping-copy').textContent = disclosureProfiles[$('#personality-type').value];

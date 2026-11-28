@@ -129,6 +129,12 @@
           <p class="conversation-empty">Click <b>Start talking</b>, allow the microphone and greet the patient. The patient waits for you to speak first.</p>
         </div>
         <div class="conversation-actions">
+          <label class="voice-route">Voice
+            <select id="voice-route">
+              <option value="openai">OpenAI (speech to text and voice)</option>
+              <option value="elevenlabs">ElevenLabs agent</option>
+            </select>
+          </label>
           <button class="save-button" id="talk-button" type="button">Start talking</button>
           <button class="back-button" id="end-button" type="button" hidden>End conversation</button>
           <a class="conversation-link" id="talk-link" target="_blank" rel="noopener">Open in ElevenLabs instead</a>

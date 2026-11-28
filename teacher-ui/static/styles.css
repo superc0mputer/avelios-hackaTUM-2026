@@ -1118,6 +1118,7 @@ input:focus, select:focus, textarea:focus {
 .conversation-state::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: #b8c4cd; vertical-align: 1px; }
 .conversation-state[data-state="listening"]::before { background: var(--teal); }
 .conversation-state[data-state="speaking"]::before { background: var(--blue); }
+.conversation-state[data-state="thinking"]::before { background: #d8a24a; }
 .conversation-state[data-state="connecting"]::before { background: #d8a24a; }
 .conversation-log {
   display: flex; flex-direction: column; gap: 8px; max-height: 360px; margin: 16px 0; padding: 14px;
@@ -1130,6 +1131,8 @@ input:focus, select:focus, textarea:focus {
 .bubble.agent { align-self: flex-start; background: var(--mint); }
 .conversation-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 .conversation-link { margin-left: auto; color: var(--blue); font-size: 11px; }
+.voice-route { display: flex; align-items: center; gap: 8px; font-size: 11px; color: inherit; }
+.voice-route select { font: inherit; padding: 6px 8px; border-radius: 8px; border: 1px solid rgba(0, 0, 0, 0.15); background: transparent; color: inherit; }
 .conversation-note { margin: 10px 0 0; color: #b35f53; font-size: 11px; }
 .conversation-note:empty { display: none; }
 @media (max-width: 640px) {
